@@ -163,6 +163,8 @@ const fileToBase64 = (file: File): Promise<string> =>
     reader.onerror = (error) => reject(error);
   });
 
+const STORAGE_KEY = 'mythos_projects_v2';
+
 export const App = () => {
     const [activeView, setActiveView] = useState<ActiveView>('dashboard');
     const [activeProjectId, setActiveProjectId] = useState<string>(DEFAULT_PROJECT_ID);
@@ -437,8 +439,6 @@ export const App = () => {
 
     const [user, setUser] = useState<any>(null);
     const [authLoading, setAuthLoading] = useState(true);
-
-    const STORAGE_KEY = 'mythos_projects_v2';
 
     // Firebase Auth and Firestore Initialization
     useEffect(() => {
@@ -886,7 +886,19 @@ export const App = () => {
             }} onUpdate={(id, t, c) => updateProjectData({ lore: project.data.lore.map(l => l.id === id ? { ...l, title: t, content: c } : l) })} onDelete={(id) => updateProjectData({ lore: project.data.lore.filter(l => l.id !== id) })} onUpdateCharacters={(chars) => updateProjectData({ characters: chars })} onUpdateLore={(loreEntries) => updateProjectData({ lore: loreEntries })} />;
             case 'prompt-library': return <PromptLibraryStudio templates={project.data.promptTemplates} onCreate={(n, p, neg) => updateProjectData({ promptTemplates: [...project.data.promptTemplates, { id: `tmpl_${Date.now()}`, name: n, positivePrompt: p, negativePrompt: neg }] })} onUpdate={(id, n, p, neg) => updateProjectData({ promptTemplates: project.data.promptTemplates.map(t => t.id === id ? { ...t, name: n, positivePrompt: p, negativePrompt: neg } : t) })} onDelete={(id) => updateProjectData({ promptTemplates: project.data.promptTemplates.filter(t => t.id !== id) })} />;
             case 'dynamic-prompts': return <DynamicPromptsStudio lists={project.data.dynamicPromptLists} onCreate={(n, i) => updateProjectData({ dynamicPromptLists: [...project.data.dynamicPromptLists, { id: `list_${Date.now()}`, name: n, items: i }] })} onUpdate={(id, n, i) => updateProjectData({ dynamicPromptLists: project.data.dynamicPromptLists.map(l => l.id === id ? { ...l, name: n, items: i } : l) })} onDelete={(id) => updateProjectData({ dynamicPromptLists: project.data.dynamicPromptLists.filter(l => l.id !== id) })} />;
-            case 'knowledge': return <KnowledgeView agents={project.data.agents} onUpdateAgent={(id, u) => updateProjectData({ agents: project.data.agents.map(a => a.id === id ? { ...a, ...u } : a) })} projectLore={project.data.lore} projectCharacters={project.data.characters} onAddLore={(title, content) => updateProjectData({ lore: [...project.data.lore, { id: `lore_${Date.now()}`, title, content, projectId: project.id }] })} graphNodePositions={project.data.graphNodePositions} onUpdateGraphNodePositions={(positions) => updateProjectData({ graphNodePositions: positions })} />;
+            case 'knowledge': return (
+                <KnowledgeView
+                    agents={project.data.agents}
+                    onUpdateAgent={(id, u) => updateProjectData({ agents: project.data.agents.map(a => a.id === id ? { ...a, ...u } : a) })}
+                    projectLore={project.data.lore}
+                    projectCharacters={project.data.characters}
+                    onAddLore={(title, content) => updateProjectData({ lore: [...project.data.lore, { id: `lore_${Date.now()}`, title, content, projectId: project.id }] })}
+                    graphNodePositions={project.data.graphNodePositions}
+                    onUpdateGraphNodePositions={(positions) => updateProjectData({ graphNodePositions: positions })}
+                    projectImages={project.data.images}
+                    onUpdateProjectImages={(imgs) => updateProjectData({ images: imgs })}
+                />
+            );
             case 'automation': return <AutomationStudio config={project.data.automationConfig} onSave={(c) => updateProjectData({ automationConfig: c })} onTestWebhook={async () => true} />;
             case 'studio-players': return <RosterStudio rosterType='player' agents={project.data.studioPlayers} images={[]} onCreateEntity={(d) => { const newAgent = { ...d, id: `player_${Date.now()}` } as Agent; updateProjectData({ studioPlayers: [...project.data.studioPlayers, newAgent] }); return newAgent; }} onViewImage={() => {}} onUpdateEntity={(id, u) => updateProjectData({ studioPlayers: project.data.studioPlayers.map(p => p.id === id ? { ...p, ...u } : p) })} onDeleteEntity={(id) => updateProjectData({ studioPlayers: project.data.studioPlayers.filter(p => p.id !== id) })} onImageUpload={() => {}} onCallEntity={() => {}} />;
             

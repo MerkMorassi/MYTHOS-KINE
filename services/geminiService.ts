@@ -7,7 +7,7 @@ import { GoogleGenAI, HarmCategory, HarmBlockThreshold, Content, Type, Modality,
 import { MythosData } from './mythosData';
 import { CONTENT_GUIDELINES } from './contentGuidelines';
 import { getGeminiApiKey } from './apiKeyService';
-import { GenerationOptions, NarrativeBranch, VisualLoreConsistencyResult, ParsedImageAsset, NarrativeThread, LoreRefinementSuggestion, VoiceTimelineEvent, CharacterBackstoryGap, ProjectConsistencyReport } from '../types';
+import { GenerationOptions, NarrativeBranch, VisualLoreConsistencyResult, ParsedImageAsset, NarrativeThread, LoreRefinementSuggestion, VoiceTimelineEvent, CharacterBackstoryGap, ProjectConsistencyReport, NarrativeDriftAnalysis, DuplicateImageSet, ThematicTaxonomyItem, BulkRenameSuggestion } from '../types';
 
 const safetySettings = [
     { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
@@ -100,24 +100,101 @@ export const mythosTools: FunctionDeclaration[] = [
     }
 ];
 
-const apiCallWithRetry = async <T>(apiFunction: () => Promise<T>, maxRetries = 3): Promise<T> => {
+export interface RetryOptions {
+    maxRetries?: number;
+    initialDelayMs?: number;
+    maxDelayMs?: number;
+    backoffFactor?: number;
+    taskName?: string;
+    onRetry?: (attempt: number, delayMs: number, error: any) => void;
+}
+
+/**
+ * Detects whether an error is caused by rate limiting, quota exhaustion, or server capacity limits.
+ */
+export const isQuotaOrRateLimitError = (error: any): boolean => {
+    if (!error) return false;
+    const msg = (error.message || String(error)).toLowerCase();
+    const status = error.status || error.code || error.statusCode || error.response?.status;
+    return (
+        status === 429 ||
+        status === 503 ||
+        status === 504 ||
+        msg.includes('429') ||
+        msg.includes('quota') ||
+        msg.includes('rate limit') ||
+        msg.includes('resource_exhausted') ||
+        msg.includes('too many requests') ||
+        msg.includes('overloaded') ||
+        msg.includes('try again later') ||
+        msg.includes('unavailable') ||
+        msg.includes('temporarily unavailable') ||
+        msg.includes('exceeded')
+    );
+};
+
+/**
+ * Executes a Gemini API function with robust exponential backoff and jitter.
+ * Automatically handles transient 429 / RESOURCE_EXHAUSTED / quota limit errors.
+ */
+export const apiCallWithRetry = async <T>(
+    apiFunction: () => Promise<T>,
+    options: number | RetryOptions = 4
+): Promise<T> => {
+    const config: RetryOptions = typeof options === 'number' ? { maxRetries: options } : options;
+    const maxRetries = config.maxRetries ?? 4;
+    const initialDelayMs = config.initialDelayMs ?? 1500;
+    const maxDelayMs = config.maxDelayMs ?? 32000;
+    const backoffFactor = config.backoffFactor ?? 2;
+    const taskName = config.taskName ?? 'Gemini API Operation';
+
+    let lastError: any = null;
+
     for (let attempt = 0; attempt < maxRetries; attempt++) {
         try {
             return await apiFunction();
         } catch (error: any) {
-            // Don't retry if it's an auth error
-            if (error.message && (error.message.includes("API Key") || error.status === 403 || error.status === 401)) {
+            lastError = error;
+            const errMsg = error?.message || String(error);
+
+            // Fast-fail for non-retryable authentication or bad syntax errors
+            if (
+                errMsg.includes("API Key is missing") ||
+                errMsg.includes("API_KEY_INVALID") ||
+                error.status === 401 ||
+                error.status === 403 ||
+                error.status === 400
+            ) {
+                console.error(`[${taskName}] Non-retryable error (${error.status || 'Auth/Config'}):`, errMsg);
                 throw error;
             }
+
             if (attempt === maxRetries - 1) {
+                console.error(`[${taskName}] All ${maxRetries} retry attempts exhausted. Final error:`, errMsg);
                 throw error;
             }
-            const delay = Math.pow(2, attempt) * 1000 + Math.random() * 1000;
-            console.warn(`[API Retry] Attempt ${attempt + 1}/${maxRetries} failed. Retrying in ${Math.round(delay/1000)}s...`);
-            await new Promise(resolve => setTimeout(resolve, delay));
+
+            const isRateLimit = isQuotaOrRateLimitError(error);
+            // If hitting quota limits, scale base delay higher (min 2.5s) to let the token bucket recover
+            const baseDelay = isRateLimit ? Math.max(initialDelayMs, 2500) : initialDelayMs;
+            
+            // Exponential backoff: baseDelay * (backoffFactor ^ attempt) with full jitter (0.75x to 1.25x)
+            const calculatedDelay = Math.min(maxDelayMs, baseDelay * Math.pow(backoffFactor, attempt));
+            const jitteredDelay = Math.round(calculatedDelay * (0.75 + Math.random() * 0.5));
+
+            console.warn(
+                `[${taskName}] Attempt ${attempt + 1}/${maxRetries} failed (${isRateLimit ? 'Quota / Rate Limit' : 'Transient Network'}). Retrying in ${(jitteredDelay / 1000).toFixed(1)}s... [${errMsg.slice(0, 120)}]`
+            );
+
+            if (config.onRetry) {
+                config.onRetry(attempt + 1, jitteredDelay, error);
+            }
+
+            await new Promise(resolve => setTimeout(resolve, jitteredDelay));
         }
     }
-    throw new Error("API call failed after multiple retries.");
+
+    throw lastError || new Error(`[${taskName}] Operation failed after ${maxRetries} retries.`);
 };
 
 export const generateImageFromGemini = async (options: GenerationOptions): Promise<Blob> => {
@@ -678,9 +755,10 @@ Return the output in this EXACT JSON structure:
 
 // --- BATCH CATEGORIZE & THEMATIC CLUSTERING (CLIENT FALLBACK) ---
 export const batchCategorizeWithGemini = async (items: Array<{ id: string; name: string; description: string; type: string }>) => {
-    return apiCallWithRetry(async () => {
-        const ai = getClient();
-        const prompt = `You are an expert story universe archivist. Group the following creative bible items (characters, lore, locations) into coherent thematic clusters and assign 2-4 semantic hashtags per item.
+    try {
+        return await apiCallWithRetry(async () => {
+            const ai = getClient();
+            const prompt = `You are an expert story universe archivist. Group the following creative bible items (characters, lore, locations) into coherent thematic clusters and assign 2-4 semantic hashtags per item.
 Items:
 ${JSON.stringify(items, null, 2)}
 
@@ -694,21 +772,39 @@ Return JSON with this exact structure:
   }
 }`;
 
-        const response = await ai.models.generateContent({
-            model: "gemini-3.8-flash",
-            contents: [{ parts: [{ text: prompt }] }],
-            config: {
-                responseMimeType: "application/json"
-            }
-        });
+            const response = await ai.models.generateContent({
+                model: "gemini-3.8-flash",
+                contents: [{ parts: [{ text: prompt }] }],
+                config: {
+                    responseMimeType: "application/json"
+                }
+            });
 
-        try {
-            return JSON.parse(response.text || '{"mappings":{}}');
-        } catch {
-            const match = (response.text || "").match(/\{[\s\S]*\}/);
-            return match ? JSON.parse(match[0]) : { mappings: {} };
-        }
-    });
+            try {
+                return JSON.parse(response.text || '{"mappings":{}}');
+            } catch {
+                const match = (response.text || "").match(/\{[\s\S]*\}/);
+                return match ? JSON.parse(match[0]) : { mappings: {} };
+            }
+        }, { maxRetries: 4, taskName: 'Batch Thematic Categorization' });
+    } catch (err) {
+        console.warn("[Gemini Batch Categorize] Rate limit or quota error after retries, applying heuristic clusters:", err);
+        const mappings: Record<string, { cluster: string; tags: string[] }> = {};
+        items.forEach(item => {
+            const text = `${item.name} ${item.description}`.toLowerCase();
+            let cluster = 'World Mythology & Lore';
+            if (item.type === 'character' || text.includes('hero') || text.includes('warden')) {
+                cluster = 'Key Figures & Factions';
+            } else if (text.includes('city') || text.includes('temple') || text.includes('sector') || text.includes('citadel')) {
+                cluster = 'Sovereign Domains & Relics';
+            }
+            mappings[item.id] = {
+                cluster,
+                tags: [item.type, cluster.toLowerCase().split(' ')[0]]
+            };
+        });
+        return { mappings };
+    }
 };
 
 // --- INTERACTIVE NARRATIVE BRANCHING SERVICE ---
@@ -1726,6 +1822,542 @@ Return JSON in this EXACT array format:
         return generateFallbackVoiceEvents();
     }
 };
+
+/**
+ * Visual Diffing & Narrative Drift Analysis Service
+ * Evaluates semantic differences between a script snippet and canonical lore entry.
+ */
+export const analyzeNarrativeDriftService = async (params: {
+    loreTitle: string;
+    loreContent: string;
+    scriptTitle: string;
+    scriptSnippet: string;
+}): Promise<NarrativeDriftAnalysis> => {
+    const { loreTitle, loreContent, scriptTitle, scriptSnippet } = params;
+
+    // Fallback algorithmic diff if Gemini API is unavailable
+    const generateFallbackDrift = (): NarrativeDriftAnalysis => {
+        const loreWords = new Set(loreContent.toLowerCase().split(/\W+/).filter(w => w.length > 3));
+        const scriptWords = new Set(scriptSnippet.toLowerCase().split(/\W+/).filter(w => w.length > 3));
+        
+        const intersection = new Set([...loreWords].filter(x => scriptWords.has(x)));
+        const union = new Set([...loreWords, ...scriptWords]);
+        const jaccard = union.size === 0 ? 1 : intersection.size / union.size;
+        const driftScore = Math.max(0, Math.min(100, Math.round((1 - jaccard) * 100)));
+
+        const status: 'critical' | 'moderate' | 'aligned' = 
+            driftScore > 60 ? 'critical' : driftScore > 30 ? 'moderate' : 'aligned';
+
+        return {
+            driftScore,
+            status,
+            driftCategories: driftScore > 30 ? ['Terminology Shift', 'Potential Narrative Drift'] : ['Canon Congruent'],
+            summary: `Automated textual analysis detected a ${driftScore}% difference index between "${loreTitle}" and script excerpt from "${scriptTitle}".`,
+            divergences: [
+                {
+                    loreStatement: loreContent.slice(0, 180) + '...',
+                    scriptStatement: scriptSnippet.slice(0, 180) + '...',
+                    explanation: `Comparative divergence index of ${driftScore}% observed across key terminology and phrasing.`,
+                    severity: status === 'critical' ? 'high' : status === 'moderate' ? 'medium' : 'low'
+                }
+            ],
+            reconciliationAdvice: [
+                'Review specific dialogue choices in the screenplay to align with canonical lore terminology.',
+                'If this script scene represents a planned evolution of canon, update the lore entry to document the shift.'
+            ],
+            suggestedLoreUpdate: loreContent,
+            suggestedScriptCorrection: scriptSnippet
+        };
+    };
+
+    try {
+        return await apiCallWithRetry(async () => {
+            const ai = getClient();
+
+            const prompt = `You are a Lead Continuity Director and Script Supervisor for a film universe.
+Examine this canonical Lore Entry against the proposed Script Snippet.
+Identify narrative drifts, character motive contradictions, timeline anomalies, and canon discrepancies.
+
+CANONICAL LORE ENTRY: "${loreTitle}"
+"""
+${loreContent.slice(0, 5000)}
+"""
+
+SCRIPT SNIPPET DRAFT: "${scriptTitle}"
+"""
+${scriptSnippet.slice(0, 5000)}
+"""
+
+TASK:
+1. Determine the narrative drift score (0 to 100%, where 0% is identical canon, 100% is complete contradiction).
+2. Assign status: "critical" (above 50%), "moderate" (20-50%), or "aligned" (under 20%).
+3. Identify drift categories (e.g. "Character Motivation Inversion", "Faction Betrayal", "Timeline Paradox", "Rule Violation", "Terminology Evolution").
+4. Provide a crisp executive summary of the narrative drift.
+5. Provide specific divergences: each with the lore statement, the conflicting script statement, explanation, and severity ("high", "medium", "low").
+6. Provide 2-4 concrete reconciliation recommendations.
+7. Provide a reconciled lore update (how the lore could be updated if the script is canon) and a corrected script snippet (how the script could be tweaked if the lore is immutable).
+
+Return JSON in this EXACT schema:
+{
+  "driftScore": 48,
+  "status": "moderate",
+  "driftCategories": ["Character Motivation Inversion", "Timeline Paradox"],
+  "summary": "The script snippet depicts a clandestine betrayal occurring before Act II, conflicting with the lore entry...",
+  "divergences": [
+    {
+      "loreStatement": "Exact quote or essence from lore...",
+      "scriptStatement": "Exact quote or line from script snippet...",
+      "explanation": "Why this creates a contradiction...",
+      "severity": "high"
+    }
+  ],
+  "reconciliationAdvice": [
+    "Clarify whether the allegiance shifted before or after the Council breach.",
+    "Adjust dialogue on page 14 to reflect canon rank."
+  ],
+  "suggestedLoreUpdate": "Updated lore text incorporating new script revelations...",
+  "suggestedScriptCorrection": "Adjusted script dialogue that maintains canonical consistency..."
+}`;
+
+            const response = await ai.models.generateContent({
+                model: "gemini-3.8-flash",
+                contents: [{ parts: [{ text: prompt }] }],
+                config: { responseMimeType: "application/json" }
+            });
+
+            try {
+                const parsed = JSON.parse(response.text || '{}');
+                return {
+                    driftScore: typeof parsed.driftScore === 'number' ? parsed.driftScore : 35,
+                    status: (parsed.status === 'critical' || parsed.status === 'aligned') ? parsed.status : 'moderate',
+                    driftCategories: Array.isArray(parsed.driftCategories) ? parsed.driftCategories : ['Narrative Variation'],
+                    summary: parsed.summary || 'Narrative drift analysis complete.',
+                    divergences: Array.isArray(parsed.divergences) ? parsed.divergences : [],
+                    reconciliationAdvice: Array.isArray(parsed.reconciliationAdvice) ? parsed.reconciliationAdvice : [],
+                    suggestedLoreUpdate: parsed.suggestedLoreUpdate,
+                    suggestedScriptCorrection: parsed.suggestedScriptCorrection
+                };
+            } catch (err) {
+                console.warn("Could not parse JSON from drift analysis, falling back:", err);
+                return generateFallbackDrift();
+            }
+        });
+    } catch (err) {
+        console.warn("Gemini narrative drift analysis fallback:", err);
+        return generateFallbackDrift();
+    }
+};
+
+/**
+ * Asset Intelligence Cleanup Service
+ * Detects duplicate and redundant images based on visual similarity and suggests merge or delete actions.
+ */
+export const detectVisualDuplicateAssetsService = async (assets: Array<{
+    id: string;
+    name: string;
+    url?: string;
+    base64?: string;
+    tags?: string[];
+    folder?: string;
+    metadata?: any;
+}>): Promise<DuplicateImageSet[]> => {
+    // 1. Algorithmic pass: detect exact or near-exact base64/URL matches
+    const duplicateSets: DuplicateImageSet[] = [];
+    const processedIds = new Set<string>();
+
+    for (let i = 0; i < assets.length; i++) {
+        const a = assets[i];
+        if (processedIds.has(a.id)) continue;
+
+        const duplicatesForA: string[] = [];
+
+        for (let j = i + 1; j < assets.length; j++) {
+            const b = assets[j];
+            if (processedIds.has(b.id)) continue;
+
+            // Direct data match
+            const isExactData = (a.base64 && b.base64 && a.base64.slice(0, 1000) === b.base64.slice(0, 1000)) ||
+                                (a.url && b.url && a.url === b.url);
+            
+            // Name similarity
+            const cleanNameA = a.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+            const cleanNameB = b.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+            const isNameVariant = cleanNameA.includes(cleanNameB) || cleanNameB.includes(cleanNameA);
+
+            // Tag overlap
+            const tagsA = new Set(a.tags || []);
+            const tagsB = new Set(b.tags || []);
+            const commonTags = [...tagsA].filter(t => tagsB.has(t));
+            const hasHighTagOverlap = tagsA.size > 1 && tagsB.size > 1 && commonTags.length >= 2;
+
+            if (isExactData) {
+                duplicatesForA.push(b.id);
+                processedIds.add(b.id);
+            } else if (isNameVariant && hasHighTagOverlap) {
+                duplicatesForA.push(b.id);
+                processedIds.add(b.id);
+            }
+        }
+
+        if (duplicatesForA.length > 0) {
+            processedIds.add(a.id);
+            duplicateSets.push({
+                id: `dup_set_${Date.now()}_${i}`,
+                similarityScore: 95,
+                reason: `Identical visual asset signatures or name/tag redundancies detected across ${duplicatesForA.length + 1} files.`,
+                keeperAssetId: a.id,
+                duplicateAssetIds: duplicatesForA,
+                recommendedAction: 'merge',
+                confidence: 'high'
+            });
+        }
+    }
+
+    // 2. Multimodal Gemini semantic clustering pass if more than 2 assets exist
+    if (assets.length >= 2 && duplicateSets.length === 0) {
+        try {
+            const aiDuplicateSets = await apiCallWithRetry(async () => {
+                const ai = getClient();
+                const assetProfiles = assets.slice(0, 24).map((a, idx) => ({
+                    id: a.id,
+                    name: a.name,
+                    tags: a.tags || [],
+                    folder: a.folder || 'Root',
+                    type: a.metadata?.type || 'image',
+                    previewSnippet: (a.base64 || a.url || '').slice(0, 100)
+                }));
+
+                const prompt = `You are a Visual Asset Intelligence Architect for a creative film production suite.
+Analyze this asset repository inventory to detect duplicate images (based on visual similarity, shared character/scene subjects, redundant iterations, or alternate render takes).
+Group redundant items into duplicate sets and suggest a 'merge' or 'delete' action for each identified duplicate set.
+
+ASSETS INVENTORY (${assets.length} items):
+${JSON.stringify(assetProfiles, null, 2)}
+
+TASK:
+Identify 1 to 5 sets of redundant or duplicate images:
+For each duplicate set:
+- Assign a similarityScore (70-100%).
+- Choose the best keeperAssetId (primary master to preserve).
+- List duplicateAssetIds (redundant versions to merge or delete).
+- Specify recommendedAction: "merge" (combine tags/metadata and remove duplicates) or "delete" (remove redundant copies).
+- Explain the reason clearly (e.g. "Candidate B is a cropped re-render of Candidate A with identical subject tags").
+
+Return JSON in this EXACT structure:
+[
+  {
+    "similarityScore": 92,
+    "reason": "Duplicate camera angle and visual composition from the same generation session.",
+    "keeperAssetId": "asset_id_here",
+    "duplicateAssetIds": ["duplicate_id_here"],
+    "recommendedAction": "merge",
+    "confidence": "high"
+  }
+]`;
+
+                const response = await ai.models.generateContent({
+                    model: "gemini-3.8-flash",
+                    contents: [{ parts: [{ text: prompt }] }],
+                    config: { responseMimeType: "application/json" }
+                });
+
+                const parsed = JSON.parse(response.text || '[]');
+                if (Array.isArray(parsed) && parsed.length > 0) {
+                    const validAiSets: DuplicateImageSet[] = [];
+                    parsed.forEach((item, idx) => {
+                        const keeperExists = assets.some(a => a.id === item.keeperAssetId);
+                        const validDups = (item.duplicateAssetIds || []).filter((dId: string) => 
+                            dId !== item.keeperAssetId && assets.some(a => a.id === dId)
+                        );
+
+                        if (keeperExists && validDups.length > 0) {
+                            validAiSets.push({
+                                id: `dup_ai_${Date.now()}_${idx}`,
+                                similarityScore: Number(item.similarityScore) || 85,
+                                reason: item.reason || 'Identified visual similarity and redundant asset composition.',
+                                keeperAssetId: item.keeperAssetId,
+                                duplicateAssetIds: validDups,
+                                recommendedAction: (item.recommendedAction === 'delete' || item.recommendedAction === 'merge') ? item.recommendedAction : 'merge',
+                                confidence: item.confidence === 'high' ? 'high' : 'medium'
+                            });
+                        }
+                    });
+
+                    if (validAiSets.length > 0) {
+                        return validAiSets;
+                    }
+                }
+                return [];
+            }, { maxRetries: 4, taskName: 'Asset Intelligence Duplicate Detection' });
+
+            if (aiDuplicateSets && aiDuplicateSets.length > 0) {
+                return aiDuplicateSets;
+            }
+        } catch (err) {
+            console.warn("Gemini duplicate asset detection fallback after retry:", err);
+        }
+    }
+
+    return duplicateSets;
+};
+
+/**
+ * Generates a clickable taxonomy of the world's overarching themes using Gemini,
+ * mapping each theme to associated lore entries and character profiles.
+ */
+export const generateThematicTaxonomyService = async (
+    loreEntries: any[] = [],
+    characters: any[] = [],
+    projectName: string = "ZOE FILMS Universe"
+): Promise<ThematicTaxonomyItem[]> => {
+    // 1. Fallback heuristic taxonomy generator
+    const generateHeuristicTaxonomy = (): ThematicTaxonomyItem[] => {
+        const defaultThemes: Array<{
+            id: string;
+            name: string;
+            description: string;
+            category: string;
+            keywords: string[];
+        }> = [
+            {
+                id: 'theme_tech_decay',
+                name: 'Technological Decay',
+                description: 'Crumbling legacy infrastructure, retrofitted machinery, and loss of ancient technological mastery.',
+                category: 'Cybernetic & Environmental',
+                keywords: ['decay', 'ruins', 'obsolete', 'salvage', 'drones', 'rust', 'infrastructure', 'broken', 'relic']
+            },
+            {
+                id: 'theme_pol_intrigues',
+                name: 'Political Intrigues',
+                description: 'Secret pacts, clandestine factions, council dissolutions, and struggles for institutional supremacy.',
+                category: 'Sociopolitical',
+                keywords: ['council', 'treaty', 'conspiracy', 'faction', 'oath', 'treason', 'senate', 'sovereign', 'hierarchy', 'order']
+            },
+            {
+                id: 'theme_transhuman_hubris',
+                name: 'Transhumanist Hubris',
+                description: 'The perils of modifying human consciousness, synthetic ascension, and moral disintegration.',
+                category: 'Philosophical',
+                keywords: ['synthetic', 'augment', 'neural', 'cyber', 'consciousness', 'clone', 'dna', 'implant', 'soul']
+            },
+            {
+                id: 'theme_void_faith',
+                name: 'Forbidden Faith & Relics',
+                description: 'Sacred artifacts of unknown origins, lost celestial rites, and forbidden esoteric knowledge.',
+                category: 'Spiritual & Esoteric',
+                keywords: ['relic', 'temple', 'shrine', 'sacred', 'forbidden', 'priest', 'cult', 'artifact', 'seal', 'monolith']
+            },
+            {
+                id: 'theme_chronal_dissonance',
+                name: 'Temporal Anomaly & Chronal Drift',
+                description: 'Shattered timelines, memory paradoxes, and the irreversible consequences of altering past events.',
+                category: 'Cosmic & Metaphysical',
+                keywords: ['time', 'temporal', 'chronal', 'stasis', 'eclipse', 'paradox', 'future', 'past', 'rift', 'timeline']
+            }
+        ];
+
+        return defaultThemes.map(theme => {
+            // Find matched lore entries
+            const matchedLore = loreEntries.filter(lore => {
+                const combined = `${lore.title || ''} ${lore.content || ''}`.toLowerCase();
+                return theme.keywords.some(kw => combined.includes(kw));
+            }).map(l => l.id);
+
+            // Find matched characters
+            const matchedChars = characters.filter(char => {
+                const combined = `${char.name || ''} ${char.archetype || ''} ${char.description || ''}`.toLowerCase();
+                return theme.keywords.some(kw => combined.includes(kw));
+            }).map(c => c.id);
+
+            return {
+                id: theme.id,
+                name: theme.name,
+                description: theme.description,
+                category: theme.category,
+                associatedLoreIds: matchedLore.length > 0 ? matchedLore : loreEntries.slice(0, 2).map(l => l.id),
+                associatedCharacterIds: matchedChars.length > 0 ? matchedChars : characters.slice(0, 2).map(c => c.id),
+                keywords: theme.keywords,
+                relevanceScore: Math.min(100, (matchedLore.length + matchedChars.length) * 15 + 40)
+            };
+        });
+    };
+
+    // 2. Call Gemini for rich deep world taxonomy
+    if (getGeminiApiKey()) {
+        try {
+            const aiTaxonomy = await apiCallWithRetry(async () => {
+                const ai = getClient();
+                const loreContext = loreEntries.slice(0, 25).map(l => `ID: ${l.id} | Title: ${l.title} | Content: ${l.content?.slice(0, 200)}`).join('\n');
+                const charContext = characters.slice(0, 20).map(c => `ID: ${c.id} | Name: ${c.name} | Archetype: ${c.archetype || 'N/A'} | Desc: ${c.description?.slice(0, 150)}`).join('\n');
+
+                const prompt = `You are a Lead Worldbuilder and Narrative Architect for the project "${projectName}".
+Analyze the provided lore entries and character profiles to generate a rich, clickable taxonomy of the world's central themes (e.g., 'Technological Decay', 'Political Intrigues', 'Moral Ambiguity in Warfare', 'Transhumanist Obsession', 'Forbidden Relics & Lost Faith').
+
+LORE ENTRIES:
+${loreContext || "No custom lore yet."}
+
+CHARACTERS:
+${charContext || "No characters yet."}
+
+Generate 4 to 8 distinct, evocative themes.
+For each theme return a JSON object with:
+- "id": string unique slug (e.g. "theme_tech_decay")
+- "name": string clean evocative title (e.g. "Technological Decay")
+- "category": string category (e.g. "Sociopolitical", "Metaphysical", "Cybernetic", "Philosophical")
+- "description": string 1-2 sentence explanation of this theme's presence in the narrative
+- "associatedLoreIds": array of lore IDs directly relevant to this theme
+- "associatedCharacterIds": array of character IDs who embody, fight against, or are affected by this theme
+- "keywords": array of 3 to 6 key terms
+- "relevanceScore": integer from 50 to 100
+
+Format as a strict JSON array.`;
+
+                const response = await ai.models.generateContent({
+                    model: "gemini-3.8-flash",
+                    contents: [{ parts: [{ text: prompt }] }],
+                    config: { responseMimeType: "application/json" }
+                });
+
+                const parsed = JSON.parse(response.text || '[]');
+                if (Array.isArray(parsed) && parsed.length > 0) {
+                    return parsed.map((item, idx) => ({
+                        id: item.id || `theme_ai_${Date.now()}_${idx}`,
+                        name: item.name || `Theme ${idx + 1}`,
+                        description: item.description || 'Deep narrative motif influencing world events and character motives.',
+                        category: item.category || 'World Dynamic',
+                        associatedLoreIds: Array.isArray(item.associatedLoreIds) ? item.associatedLoreIds : [],
+                        associatedCharacterIds: Array.isArray(item.associatedCharacterIds) ? item.associatedCharacterIds : [],
+                        keywords: Array.isArray(item.keywords) ? item.keywords : [],
+                        relevanceScore: Number(item.relevanceScore) || 75
+                    }));
+                }
+                return [];
+            }, { maxRetries: 4, taskName: 'Thematic Taxonomy Generation' });
+
+            if (aiTaxonomy && aiTaxonomy.length > 0) {
+                return aiTaxonomy;
+            }
+        } catch (err) {
+            console.warn("Gemini thematic taxonomy generator fallback after retry:", err);
+        }
+    }
+
+    return generateHeuristicTaxonomy();
+};
+
+/**
+ * Uses Gemini to suggest clean, descriptive, standardized filenames for assets based on their tags and metadata.
+ */
+export const suggestBulkFilenamesService = async (
+    assets: Array<{
+        id: string;
+        currentName: string;
+        tags?: string[];
+        folder?: string;
+        metadata?: any;
+        type?: string;
+    }>
+): Promise<BulkRenameSuggestion[]> => {
+    // 1. Heuristic fallback
+    const heuristicSuggestions: BulkRenameSuggestion[] = assets.map((a, idx) => {
+        const extMatch = a.currentName.match(/\.[0-9a-z]+$/i);
+        const ext = extMatch ? extMatch[0].toLowerCase() : (a.type?.includes('image') ? '.png' : '.txt');
+        const tags = (a.tags || []).filter(t => Boolean(t.trim()));
+        
+        let prefix = 'Asset';
+        if (a.folder) {
+            prefix = a.folder.replace(/[^a-zA-Z0-9]/g, '_');
+        } else if (tags.length > 0) {
+            prefix = tags[0].replace(/[^a-zA-Z0-9]/g, '_');
+        }
+
+        const tagSuffix = tags.slice(0, 2).map(t => t.charAt(0).toUpperCase() + t.slice(1).replace(/[^a-zA-Z0-9]/g, '')).join('_');
+        const cleanBase = a.currentName.replace(/\.[0-9a-z]+$/i, '').replace(/[^a-zA-Z0-9]/g, '_').slice(0, 25);
+        const suggested = `${prefix}_${tagSuffix || cleanBase || `Item_${idx + 1}`}${ext}`;
+
+        return {
+            id: a.id,
+            currentName: a.currentName,
+            suggestedName: suggested,
+            reasoning: tags.length > 0 ? `Standardized with primary tags: ${tags.join(', ')}` : `Formatted with folder category ${a.folder || 'Default'}`,
+            tags: tags,
+            folder: a.folder,
+            type: a.type
+        };
+    });
+
+    if (getGeminiApiKey() && assets.length > 0) {
+        try {
+            const aiSuggestions = await apiCallWithRetry(async () => {
+                const ai = getClient();
+                const assetSummaries = assets.slice(0, 30).map(a => ({
+                    id: a.id,
+                    currentName: a.currentName,
+                    tags: a.tags || [],
+                    folder: a.folder || 'General',
+                    type: a.type || 'unknown',
+                    context: a.metadata?.summary || a.metadata?.description || ''
+                }));
+
+                const prompt = `You are a Digital Asset Management (DAM) specialist for a high-end film and transmedia universe.
+Analyze the following asset records and suggest clean, descriptive, production-standard filenames based on their tags, folder/collection, and metadata.
+
+Rules:
+1. Always preserve the original file extension (e.g. .png, .jpg, .webp, .md, .txt, .pdf).
+2. Follow clear PascalCase / snake_case conventions: e.g., "Char_Vaelen_ObsidianArmor_Concept.png", "Script_Citadel_Breach_Act1.md", "Env_Sector7_NeonSlums_Exterior.png".
+3. Eliminate meaningless timestamps, raw hashes, or UUID prefixes (e.g. "image_17281928_xyz" -> descriptive name).
+4. Provide a 1-sentence reasoning for the rename.
+
+ASSET RECORDS:
+${JSON.stringify(assetSummaries, null, 2)}
+
+Return a strict JSON array of objects:
+[
+  {
+    "id": "asset_id_here",
+    "suggestedName": "Char_Marcus_CouncilElder_Portrait.png",
+    "reasoning": "Standardized around character name and portrait archetype tags."
+  }
+]`;
+
+                const response = await ai.models.generateContent({
+                    model: "gemini-3.8-flash",
+                    contents: [{ parts: [{ text: prompt }] }],
+                    config: { responseMimeType: "application/json" }
+                });
+
+                const parsed = JSON.parse(response.text || '[]');
+                if (Array.isArray(parsed) && parsed.length > 0) {
+                    return assets.map((a, i) => {
+                        const match = parsed.find((p: any) => p.id === a.id);
+                        if (match && match.suggestedName) {
+                            return {
+                                id: a.id,
+                                currentName: a.currentName,
+                                suggestedName: match.suggestedName,
+                                reasoning: match.reasoning || 'AI-suggested semantic filename based on tags and metadata.',
+                                tags: a.tags || [],
+                                folder: a.folder,
+                                type: a.type
+                            };
+                        }
+                        return heuristicSuggestions[i];
+                    });
+                }
+                return heuristicSuggestions;
+            }, { maxRetries: 4, taskName: 'Bulk Filename Suggestion' });
+
+            if (aiSuggestions && aiSuggestions.length > 0) {
+                return aiSuggestions;
+            }
+        } catch (err) {
+            console.warn("Gemini bulk filenames service fallback after retry:", err);
+        }
+    }
+
+    return heuristicSuggestions;
+};
+
 
 
 

@@ -15,7 +15,10 @@ import { LoreRefinementAssistant } from './LoreRefinementAssistant';
 import { LoreGraphDiscovery } from './LoreGraphDiscovery';
 import { generateContradictionsPdfReport } from '../utils/pdfReportGenerator';
 import { generateLoreMarkdown, downloadLoreMarkdownFile } from '../utils/loreMarkdownExporter';
-import { NarrativeThread } from '../types.ts';
+import { NarrativeThread, ImageState } from '../types.ts';
+import { AssetIntelligenceCleanupModal } from './AssetIntelligenceCleanupModal';
+import { LoreWiki } from './LoreWiki';
+import { BulkRenameModal } from './BulkRenameModal';
 
 // Firebase Firestore Imports
 import { db, auth } from '../services/firebase';
@@ -30,9 +33,11 @@ interface KnowledgeViewProps {
     onAddLore?: (title: string, content: string) => void;
     graphNodePositions?: Record<string, { x: number; y: number }>;
     onUpdateGraphNodePositions?: (positions: Record<string, { x: number; y: number }>) => void;
+    projectImages?: ImageState[];
+    onUpdateProjectImages?: (images: ImageState[]) => void;
 }
 
-type StudioTab = 'overview' | 'vectors' | 'graph' | 'forge' | 'subgraph' | 'refinement';
+type StudioTab = 'overview' | 'vectors' | 'graph' | 'forge' | 'subgraph' | 'refinement' | 'wiki';
 
 export const KnowledgeView: React.FC<KnowledgeViewProps> = ({ 
     agents, 
@@ -40,11 +45,15 @@ export const KnowledgeView: React.FC<KnowledgeViewProps> = ({
     projectCharacters = [], 
     onAddLore,
     graphNodePositions,
-    onUpdateGraphNodePositions
+    onUpdateGraphNodePositions,
+    projectImages = [],
+    onUpdateProjectImages
 }) => {
     const [selectedAgentId, setSelectedAgentId] = useState<string>(agents.length > 0 ? agents[0].id : '');
     const selectedAgent = agents.find(a => a.id === selectedAgentId) || agents[0];
     const [activeTab, setActiveTab] = useState<StudioTab>('overview');
+    const [showAssetCleanupModal, setShowAssetCleanupModal] = useState(false);
+    const [showBulkRenameModal, setShowBulkRenameModal] = useState(false);
 
     // D3 Force-Directed Graph Layout Coordinates State
     const [nodePositions, setNodePositions] = useState<Record<string, { x: number; y: number }>>(graphNodePositions || {});
@@ -742,6 +751,76 @@ export const KnowledgeView: React.FC<KnowledgeViewProps> = ({
             alert("Bulk tagging failed.");
         }
     };
+
+    const handleApplyBulkRename = async (renames: Array<{ id: string; oldName: string; newName: string }>) => {
+        try {
+            for (const r of renames) {
+                if (!r.newName || r.oldName === r.newName) continue;
+                const matchingVectors = vectors.filter(v => v.source === r.oldName);
+                for (const vec of matchingVectors) {
+                    const updated = {
+                        ...vec,
+                        source: r.newName,
+                        metadata: {
+                            ...vec.metadata,
+                            filename: r.newName
+                        }
+                    };
+                    await vectorDb.upsertVector(updated);
+                    try {
+                        if (auth.currentUser) {
+                            await setDoc(doc(db, 'vectors', vec.id), updated, { merge: true });
+                        }
+                    } catch (e) {}
+                }
+            }
+
+            if (projectImages && onUpdateProjectImages) {
+                const updatedImages = projectImages.map(img => {
+                    const match = renames.find(r => r.oldName === img.metadata?.filename || r.id === img.id);
+                    if (match) {
+                        return {
+                            ...img,
+                            metadata: {
+                                ...img.metadata,
+                                filename: match.newName
+                            }
+                        };
+                    }
+                    return img;
+                });
+                onUpdateProjectImages(updatedImages);
+            }
+
+            const updatedVectors = await vectorDb.getVectorsByAgent(selectedAgentId);
+            setVectors(updatedVectors);
+            setSelectedSources([]);
+            setShowBulkRenameModal(false);
+        } catch (err) {
+            console.error("Bulk rename error:", err);
+            alert("Bulk renaming encountered an error.");
+        }
+    };
+
+    const selectedAssetItems = selectedSources.map(s => {
+        const matchingVectors = vectors.filter(v => v.source === s);
+        const tagsSet = new Set<string>();
+        matchingVectors.forEach(v => {
+            if (v.metadata?.tags && Array.isArray(v.metadata.tags)) {
+                v.metadata.tags.forEach((t: string) => tagsSet.add(t));
+            }
+        });
+        const folder = matchingVectors[0]?.metadata?.collection || activeCollection;
+        const type = matchingVectors[0]?.metadata?.type || 'document';
+        return {
+            id: s,
+            currentName: s,
+            tags: Array.from(tagsSet),
+            folder: folder !== 'all' ? folder : 'General',
+            metadata: matchingVectors[0]?.metadata,
+            type
+        };
+    });
 
     const handleTextSelection = () => {
         const selection = window.getSelection();
@@ -1445,6 +1524,13 @@ export const KnowledgeView: React.FC<KnowledgeViewProps> = ({
                         >
                             <span>📝</span> Export Lore (.md)
                         </button>
+                        <button 
+                            onClick={() => setShowAssetCleanupModal(true)} 
+                            className="bg-amber-600 hover:bg-amber-500 text-white px-3.5 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all border border-amber-500/40 shadow flex items-center gap-1.5 cursor-pointer"
+                            title="Detect duplicate images based on visual similarity and suggest merge or delete actions"
+                        >
+                            <span>🧹</span> Asset Cleanup
+                        </button>
                         <button onClick={handleExport} className="bg-neutral-800 hover:bg-neutral-700 text-white px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors border border-neutral-700">
                             Export (GZIP)
                         </button>
@@ -1459,6 +1545,7 @@ export const KnowledgeView: React.FC<KnowledgeViewProps> = ({
                 <div className="flex flex-wrap gap-1 bg-black/40 p-1 rounded-xl border border-neutral-800 w-fit">
                     {[
                         { id: 'overview', label: 'Factory' },
+                        { id: 'wiki', label: '📖 Lore Wiki' },
                         { id: 'subgraph', label: '⚠️ Contradiction Subgraph' },
                         { id: 'refinement', label: '✨ AI Refinement' },
                         { id: 'vectors', label: 'Sacred Archive' },
@@ -2414,6 +2501,13 @@ export const KnowledgeView: React.FC<KnowledgeViewProps> = ({
                                     <div className="flex items-center gap-3">
                                         <span className="text-xs text-neutral-500 font-mono">{filteredSourcesByCol.length} Documents</span>
                                         <button
+                                            onClick={() => setShowAssetCleanupModal(true)}
+                                            className="bg-amber-600/20 hover:bg-amber-600 text-amber-300 hover:text-white border border-amber-500/40 text-[10px] font-black uppercase tracking-wider px-3.5 py-1.5 rounded-lg transition-all shadow-md cursor-pointer flex items-center gap-1.5"
+                                            title="Asset Intelligence Cleanup: Detect duplicate images based on visual similarity and suggest merge/delete actions"
+                                        >
+                                            <span>🧹</span> Asset Cleanup
+                                        </button>
+                                        <button
                                             onClick={handleExportLoreMarkdown}
                                             className="bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-500/40 text-[10px] font-black uppercase tracking-wider px-3.5 py-1.5 rounded-lg transition-all shadow-md cursor-pointer flex items-center gap-1.5"
                                             title="Export entire lore repository into a single, organized Markdown file containing all entries, relationships, and metadata"
@@ -2466,6 +2560,13 @@ export const KnowledgeView: React.FC<KnowledgeViewProps> = ({
                                                 className="bg-blue-600 hover:bg-blue-500 text-white font-black uppercase text-[10px] tracking-wider px-3.5 py-1.5 rounded-lg transition-all shadow-md cursor-pointer"
                                             >
                                                 📁 Bulk Move
+                                            </button>
+                                            <button
+                                                onClick={() => setShowBulkRenameModal(true)}
+                                                className="bg-emerald-600 hover:bg-emerald-500 text-white font-black uppercase text-[10px] tracking-wider px-3.5 py-1.5 rounded-lg transition-all shadow-md cursor-pointer flex items-center gap-1"
+                                                title="Bulk Rename: Use Gemini to suggest descriptive filenames based on asset tags and metadata"
+                                            >
+                                                <span>✏️</span> Bulk Rename
                                             </button>
                                         </div>
                                     </div>
@@ -2801,6 +2902,17 @@ export const KnowledgeView: React.FC<KnowledgeViewProps> = ({
                             projectLore={projectLore}
                             audioSentimentData={audioAnalysisCache}
                             onApplyRefinement={handleApplyLoreRefinement}
+                        />
+                    </div>
+                )}
+
+                {activeTab === 'wiki' && (
+                    <div className="max-w-6xl mx-auto space-y-6">
+                        <LoreWiki
+                            lore={projectLore}
+                            characters={projectCharacters}
+                            activeProjectId={selectedAgent?.id}
+                            onAddLore={onAddLore}
                         />
                     </div>
                 )}
@@ -3392,6 +3504,25 @@ export const KnowledgeView: React.FC<KnowledgeViewProps> = ({
                     </div>
                 </div>
             )}
+
+            {/* ASSET INTELLIGENCE CLEANUP MODAL */}
+            <AssetIntelligenceCleanupModal
+                isOpen={showAssetCleanupModal}
+                onClose={() => setShowAssetCleanupModal(false)}
+                images={projectImages}
+                onUpdateImages={onUpdateProjectImages}
+                onRefreshGrid={() => {
+                    if (selectedAgent?.id) loadVectors(selectedAgent.id);
+                }}
+            />
+
+            {/* BULK RENAME INTELLIGENCE MODAL */}
+            <BulkRenameModal
+                isOpen={showBulkRenameModal}
+                onClose={() => setShowBulkRenameModal(false)}
+                selectedAssets={selectedAssetItems}
+                onApplyRename={handleApplyBulkRename}
+            />
         </div>
     );
 };

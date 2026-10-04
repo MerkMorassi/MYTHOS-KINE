@@ -285,6 +285,28 @@ export interface ProjectConsistencyReport {
   priorityRecommendations: string[];
 }
 
+export interface ThematicTaxonomyItem {
+  id: string;
+  name: string; // e.g. "Technological Decay", "Political Intrigues"
+  description: string;
+  category?: string; // e.g. "Societal", "Philosophical", "Cosmic", "Cybernetic"
+  associatedLoreIds: string[];
+  associatedCharacterIds: string[];
+  keywords?: string[];
+  relevanceScore?: number;
+}
+
+export interface BulkRenameSuggestion {
+  id: string;
+  currentName: string;
+  suggestedName: string;
+  reasoning: string;
+  tags: string[];
+  folder?: string;
+  type?: string;
+  applied?: boolean;
+}
+
 export interface SceneCompositorState {
   background: { base64: string; mimeType: string } | null;
   character: { base64: string; mimeType: string } | null;
@@ -858,6 +880,32 @@ export interface Message {
 export type StreamChunk = 
   | { type: 'text'; content: string }
   | { type: 'tool_call'; toolCall: { id: string; name: string; args: any; } };
+
+export interface NarrativeDriftAnalysis {
+  driftScore: number; // 0-100%
+  status: 'critical' | 'moderate' | 'aligned';
+  driftCategories: string[];
+  summary: string;
+  divergences: Array<{
+    loreStatement: string;
+    scriptStatement: string;
+    explanation: string;
+    severity: 'high' | 'medium' | 'low';
+  }>;
+  reconciliationAdvice: string[];
+  suggestedLoreUpdate?: string;
+  suggestedScriptCorrection?: string;
+}
+
+export interface DuplicateImageSet {
+  id: string;
+  similarityScore: number; // 0-100%
+  reason: string;
+  keeperAssetId: string;
+  duplicateAssetIds: string[];
+  recommendedAction: 'merge' | 'delete' | 'review';
+  confidence: 'high' | 'medium';
+}
   
 declare global {
     interface AIStudio {

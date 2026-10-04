@@ -54,8 +54,9 @@ class FactoryService {
         signal?: AbortSignal
     }) {
         const { agentId, onProgress, signal } = opts;
-        const BATCH_SIZE = 40; // How many chunks to embed in one API call
-        const CONCURRENCY = 5; // How many API calls to have in flight at once
+        // METERED CONCURRENCY: Keep batch size to 6 chunks and concurrency to 2 to prevent quota exhaustion
+        const BATCH_SIZE = 6;
+        const CONCURRENCY = 2;
         
         let processed = 0;
         let written = 0;
@@ -68,8 +69,20 @@ class FactoryService {
         const runOne = async (chunkGroup: { text: string, source: string, metadata?: any }[]) => {
             if (signal?.aborted) throw new Error('Aborted');
             
-            const embeddingPromises = chunkGroup.map(c => getEmbeddings(c.text));
-            const vectors = await Promise.all(embeddingPromises);
+            // Sequential / paced embedding generation to strictly avoid burst rate-limit spikes
+            const vectors: (number[] | null)[] = [];
+            for (const chunk of chunkGroup) {
+                if (signal?.aborted) throw new Error('Aborted');
+                try {
+                    const vec = await getEmbeddings(chunk.text);
+                    vectors.push(vec);
+                } catch (embErr) {
+                    console.warn(`[Lorepack Ingest] Embedding failed for chunk in "${chunk.source}", continuing:`, embErr);
+                    vectors.push(null);
+                }
+                // Small 120ms throttle between sequential embeddings in the same group
+                await new Promise(r => setTimeout(r, 120));
+            }
 
             const nowISO = new Date().toISOString();
             const nodes: VectorRecord[] = chunkGroup.map((x, i) => ({
@@ -84,15 +97,17 @@ class FactoryService {
                     timestamp: nowISO,
                     ...(x.metadata || {})
                 }
-            })).filter(n => n.vector);
+            })).filter(n => n.vector && Array.isArray(n.vector));
 
-            await vectorDb.addVectors(nodes);
-            written += nodes.length;
+            if (nodes.length > 0) {
+                await vectorDb.addVectors(nodes);
+                written += nodes.length;
+            }
             processed += chunkGroup.length;
             if (onProgress) onProgress({ processed, written, total: batches.length });
         };
         
-        const inFlight = new Set();
+        const inFlight = new Set<Promise<void>>();
         let idx = 0;
         while (idx < groups.length) {
             if (signal?.aborted) throw new Error('Aborted');

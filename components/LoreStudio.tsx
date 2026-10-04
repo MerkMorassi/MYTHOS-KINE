@@ -1,11 +1,13 @@
 
 import React, { useState, useEffect } from 'react';
-import { LoreEntry } from '../types.ts';
+import { LoreEntry, ThematicTaxonomyItem } from '../types.ts';
 import { LoreIcon, FolderIcon } from './icons.tsx';
 import { LoreNetwork } from './LoreNetwork.tsx';
 import { batchCategorizeWithGemini } from '../services/geminiService.ts';
 import { EntityTimeline } from './EntityTimeline.tsx';
 import { LoreBatchAuditTool } from './LoreBatchAuditTool.tsx';
+import { NarrativeDriftDiffTool } from './NarrativeDriftDiffTool.tsx';
+import { ThematicNavigator } from './ThematicNavigator.tsx';
 
 interface ProjectSummary {
     id: string;
@@ -346,7 +348,8 @@ export const LoreStudio: React.FC<LoreStudioProps> = ({
     onUpdateCharacters, 
     onUpdateLore 
 }) => {
-    const [activeTab, setActiveTab] = useState<'bible' | 'network' | 'clustering' | 'heatmap' | 'timeline' | 'audit'>('bible');
+    const [activeTab, setActiveTab] = useState<'bible' | 'network' | 'clustering' | 'heatmap' | 'timeline' | 'audit' | 'diff' | 'navigator'>('bible');
+    const [selectedTheme, setSelectedTheme] = useState<ThematicTaxonomyItem | null>(null);
     const [newTitle, setNewTitle] = useState('');
     const [newContent, setNewContent] = useState('');
     const [selectedProjectId, setSelectedProjectId] = useState('');
@@ -525,10 +528,46 @@ export const LoreStudio: React.FC<LoreStudioProps> = ({
                     >
                         📑 Batch Audit & Consistency
                     </button>
+                    <button
+                        onClick={() => setActiveTab('diff')}
+                        className={`px-5 py-3 border-b-2 text-xs uppercase tracking-widest font-black transition-all flex items-center gap-1.5 ${
+                            activeTab === 'diff' 
+                                ? 'border-rose-500 text-rose-400' 
+                                : 'border-transparent text-neutral-400 hover:text-neutral-200'
+                        }`}
+                    >
+                        🔍 Narrative Drift Diff
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('navigator')}
+                        className={`px-5 py-3 border-b-2 text-xs uppercase tracking-widest font-black transition-all flex items-center gap-1.5 ${
+                            activeTab === 'navigator' 
+                                ? 'border-indigo-500 text-indigo-400' 
+                                : 'border-transparent text-neutral-400 hover:text-neutral-200'
+                        }`}
+                    >
+                        🧭 Thematic Navigator
+                    </button>
                 </div>
             </div>
 
-            {activeTab === 'audit' ? (
+            {activeTab === 'navigator' ? (
+                <ThematicNavigator
+                    lore={lore}
+                    characters={characters}
+                    projectName={projects.find(p => p.id === activeProjectId)?.name || 'ZOE FILMS Universe'}
+                    activeThemeId={selectedTheme?.id}
+                    onSelectTheme={(theme) => setSelectedTheme(theme)}
+                />
+            ) : activeTab === 'diff' ? (
+                <NarrativeDriftDiffTool
+                    lore={lore}
+                    scriptsBin={scriptsBin}
+                    activeProjectId={activeProjectId}
+                    onUpdateLore={onUpdate}
+                    onCreateLore={(t, c) => onCreate(t, c, activeProjectId || '')}
+                />
+            ) : activeTab === 'audit' ? (
                 <LoreBatchAuditTool
                     characters={characters}
                     lore={lore}
@@ -781,9 +820,37 @@ export const LoreStudio: React.FC<LoreStudioProps> = ({
                         </form>
                     </div>
                     
+                    {/* Thematic Filter Banner */}
+                    {selectedTheme && (
+                        <div className="mb-6 p-4 bg-gradient-to-r from-blue-950/60 to-purple-950/60 border border-blue-500/50 rounded-xl flex items-center justify-between gap-4 animate-fade-in shadow-lg">
+                            <div className="flex items-center gap-3">
+                                <span className="text-xl">🧭</span>
+                                <div>
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-[10px] uppercase font-mono font-bold text-blue-400">Thematic Filter Active:</span>
+                                        <span className="text-sm font-black text-white">{selectedTheme.name}</span>
+                                    </div>
+                                    <p className="text-xs text-neutral-300 mt-0.5">{selectedTheme.description}</p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => setSelectedTheme(null)}
+                                className="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 rounded-lg text-xs font-bold transition-all border border-neutral-700 cursor-pointer"
+                            >
+                                ✕ Clear Theme Filter
+                            </button>
+                        </div>
+                    )}
+
                     <div className="space-y-4">
-                        {lore.length > 0 ? (
-                            lore.map(entry => (
+                        {(() => {
+                            const displayedLore = selectedTheme 
+                                ? lore.filter(l => selectedTheme.associatedLoreIds.includes(l.id) || 
+                                    (selectedTheme.keywords && selectedTheme.keywords.some(k => `${l.title} ${l.content}`.toLowerCase().includes(k.toLowerCase()))))
+                                : lore;
+
+                            return displayedLore.length > 0 ? (
+                                displayedLore.map(entry => (
                                 <div key={entry.id}>
                                     {editingId === entry.id ? (
                                         <LoreEntryEditor
@@ -818,10 +885,15 @@ export const LoreStudio: React.FC<LoreStudioProps> = ({
                         ) : (
                             <div className="flex flex-col items-center justify-center h-[50vh] border-2 border-dashed border-neutral-800 rounded-xl bg-neutral-900/30 text-center p-8">
                                 <div className="w-16 h-16 text-neutral-700 mb-4"><LoreIcon /></div>
-                                <h3 className="text-xl font-semibold text-neutral-300 mb-2">Your Lore Bible is Empty</h3>
-                                <p className="text-neutral-500">Add entries above to start building your story's universe.</p>
+                                <h3 className="text-xl font-semibold text-neutral-300 mb-2">
+                                    {selectedTheme ? `No Lore Entries Found for "${selectedTheme.name}"` : 'Your Lore Bible is Empty'}
+                                </h3>
+                                <p className="text-neutral-500">
+                                    {selectedTheme ? 'Clear the thematic filter or tag lore entries to this theme.' : "Add entries above to start building your story's universe."}
+                                </p>
                             </div>
-                        )}
+                        );
+                        })()}
                     </div>
                 </>
             )}

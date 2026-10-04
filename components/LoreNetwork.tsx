@@ -97,6 +97,29 @@ export const LoreNetwork: React.FC<LoreNetworkProps> = ({ lore, characters, acti
     const [isComputing, setIsComputing] = useState<boolean>(false);
     const [computeProgress, setComputeProgress] = useState<string>('');
 
+    // Persisted Node Positions for D3 Force-Directed Graph Layout
+    const [nodePositions, setNodePositions] = useState<Record<string, { x: number; y: number }>>(() => {
+        try {
+            const cached = localStorage.getItem(`lore_network_positions_${activeProjectId}`);
+            return cached ? JSON.parse(cached) : {};
+        } catch (e) {
+            return {};
+        }
+    });
+    const nodePositionsRef = useRef<Record<string, { x: number; y: number }>>(nodePositions);
+
+    useEffect(() => {
+        nodePositionsRef.current = nodePositions;
+    }, [nodePositions]);
+
+    const handleResetLayout = () => {
+        setNodePositions({});
+        nodePositionsRef.current = {};
+        try {
+            localStorage.removeItem(`lore_network_positions_${activeProjectId}`);
+        } catch (e) {}
+    };
+
     // Persist cache updates
     useEffect(() => {
         localStorage.setItem(`lore_embeddings_${activeProjectId}`, JSON.stringify(embeddings));
@@ -332,7 +355,17 @@ export const LoreNetwork: React.FC<LoreNetworkProps> = ({ lore, characters, acti
         highlightGrad.append("stop").attr("offset", "100%").attr("stop-color", "#c084fc").attr("stop-opacity", 0.9);
 
         // Setup force simulation
-        const nodesData = filteredNodes.map(d => ({ ...d }));
+        const nodesData = filteredNodes.map(d => {
+            const copy = { ...d } as any;
+            const saved = nodePositionsRef.current[d.id];
+            if (saved && typeof saved.x === 'number' && typeof saved.y === 'number') {
+                copy.x = saved.x;
+                copy.y = saved.y;
+                copy.fx = saved.x;
+                copy.fy = saved.y;
+            }
+            return copy;
+        });
         
         // Match string references back to object references
         const linksData = links.map(l => {
@@ -529,8 +562,20 @@ export const LoreNetwork: React.FC<LoreNetworkProps> = ({ lore, characters, acti
             })
             .on("end", (event, d: any) => {
                 if (!event.active) simulation.alphaTarget(0);
-                d.fx = null;
-                d.fy = null;
+                const finalX = Math.round(event.x);
+                const finalY = Math.round(event.y);
+                d.fx = finalX;
+                d.fy = finalY;
+
+                const next = {
+                    ...nodePositionsRef.current,
+                    [d.id]: { x: finalX, y: finalY }
+                };
+                nodePositionsRef.current = next;
+                setNodePositions(next);
+                try {
+                    localStorage.setItem(`lore_network_positions_${activeProjectId}`, JSON.stringify(next));
+                } catch (e) {}
             });
 
         node.call(drag as any);
@@ -603,6 +648,16 @@ export const LoreNetwork: React.FC<LoreNetworkProps> = ({ lore, characters, acti
                             </svg>
                             <span>Download PNG</span>
                         </button>
+
+                        {Object.keys(nodePositions).length > 0 && (
+                            <button
+                                onClick={handleResetLayout}
+                                className="px-3 py-1.5 bg-neutral-800 hover:bg-rose-950/60 text-neutral-300 hover:text-rose-400 border border-neutral-700/80 hover:border-rose-800 font-bold text-xs rounded-lg shadow-md transition-all flex items-center gap-1.5"
+                                title="Reset all manually positioned/pinned nodes to automatic layout"
+                            >
+                                <span>↺</span> Reset Layout ({Object.keys(nodePositions).length})
+                            </button>
+                        )}
 
                         <button
                             onClick={computeMissingEmbeddings}
