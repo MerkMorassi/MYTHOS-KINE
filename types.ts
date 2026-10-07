@@ -1,6 +1,17 @@
 export type RAGProvider = 'cloud' | 'localhost' | 'browser';
 export type ModelEngine = 'gemini' | 'dolphin';
-export type ActiveView = 'dashboard' | 'projects' | 'team' | 'core' | 'ideation' | 'scripting' | 'design' | 'art' | 'director' | 'mythos-cinematic-engine' | 'one-shot-cinematic' | 'image-generator' | 'generative-video' | 'transition-studio' | 'camera-movement' | 'camera-moves' | 'blender' | 'scene-compositor' | 'composite' | 'face-swap' | 'face-repair' | 'photorealism' | 'resize' | 'green-screen' | 'background-removal' | 'qwen-image-edit' | 'topaz' | 'grid' | 'story' | 'inspiration' | 'scripts-bin' | 'script-writer' | 'agents' | 'studio-players' | 'characters' | 'lore' | 'prompt-library' | 'dynamic-prompts' | 'agent-chat' | 'knowledge' | 'automation' | 'agent-workspace' | 'voice-lab' | 'model-settings' | 'wanimate-studio' | 'dubbing-studio' | 'ltx-studio' | 'live-studio' | 'veo-3-studio' | 'nano-banana-studio' | 'lyria-studio' | 'bigger-pics-studio' | 'composer-studio' | 'transcription-studio';
+export type ActiveView = 'dashboard' | 'projects' | 'team' | 'core' | 'ideation' | 'scripting' | 'design' | 'art' | 'director' | 'mythos-cinematic-engine' | 'one-shot-cinematic' | 'image-generator' | 'generative-video' | 'transition-studio' | 'camera-movement' | 'camera-moves' | 'blender' | 'scene-compositor' | 'composite' | 'face-swap' | 'face-repair' | 'photorealism' | 'resize' | 'green-screen' | 'background-removal' | 'qwen-image-edit' | 'topaz' | 'grid' | 'story' | 'inspiration' | 'scripts-bin' | 'script-writer' | 'agents' | 'studio-players' | 'characters' | 'lore' | 'prompt-library' | 'dynamic-prompts' | 'agent-chat' | 'knowledge' | 'automation' | 'agent-workspace' | 'voice-lab' | 'voice-command-log' | 'model-settings' | 'wanimate-studio' | 'dubbing-studio' | 'ltx-studio' | 'live-studio' | 'veo-3-studio' | 'nano-banana-studio' | 'lyria-studio' | 'bigger-pics-studio' | 'composer-studio' | 'transcription-studio';
+
+export interface VoiceCommandLogEntry {
+  id: string;
+  transcript: string;
+  commandName: string;
+  status: 'executed' | 'unrecognized';
+  actionDescription: string;
+  targetView?: string;
+  timestamp: number;
+  confidence?: number;
+}
 
 export type GridOverlayType = 'none' | 'basic' | 'triadic' | 'golden-basic' | 'golden-triadic';
 
@@ -66,6 +77,23 @@ export interface StoryboardFrame {
   base64Image: string;
   notes: string;
   prompt?: string;
+  timestamp?: string;
+  shotType?: string;
+  sceneName?: string;
+  scriptSegment?: string;
+  imageMetadata?: {
+    model?: string;
+    engine?: string;
+    aspectRatio?: string;
+    guidanceScale?: number;
+    seed?: string | number;
+    prompt?: string;
+    cameraAngle?: string;
+    dimensions?: string;
+    generatedAt?: string;
+    [key: string]: any;
+  };
+  duration?: number;
 }
 
 export interface InspirationImage {
@@ -905,6 +933,119 @@ export interface DuplicateImageSet {
   duplicateAssetIds: string[];
   recommendedAction: 'merge' | 'delete' | 'review';
   confidence: 'high' | 'medium';
+}
+
+export type ContradictionDomain = 
+  | 'Timeline & Chronology' 
+  | 'Character Arc & Motivation' 
+  | 'Physical & Tech Rules' 
+  | 'World & Environmental Laws' 
+  | 'Faction & Political Allegiance';
+
+export interface KnowledgeInsightContradiction {
+  id: string;
+  title: string;
+  conflictingEntities: string[];
+  thematicDomain: ContradictionDomain;
+  severity: 'critical' | 'high' | 'medium' | 'low';
+  evidenceExcerpt: string;
+  contradictionSummary: string;
+  thematicResolution: {
+    strategy: string;
+    narrativeSynthesis: string;
+    suggestedLoreTitle: string;
+    draftLoreContent: string;
+  };
+  sourceDocuments: string[];
+  status?: 'unresolved' | 'resolved' | 'in_review';
+}
+
+export interface CharacterArcMilestone {
+  id: string;
+  scriptId: string;
+  scriptTitle: string;
+  scriptDate?: string;
+  sceneHeading?: string;
+  title: string;
+  summary: string;
+  sceneExcerpt: string;
+  arcPhase: 'Introduction' | 'Inciting Action' | 'Rising Conflict' | 'Crisis & Ordeal' | 'Climax' | 'Resolution';
+  emotionalShift: string;
+  dramaticWeight: 'subtle' | 'major' | 'climactic';
+  presenceScore: number;
+  timestamp?: number;
+}
+
+export interface CharacterArcReport {
+  characterId: string;
+  characterName: string;
+  archetype: string;
+  overallArcTrajectory: string;
+  primaryInternalConflict: string;
+  transformationVerdict: string;
+  totalScriptAppearances: number;
+  totalDialogueMentions: number;
+  milestones: CharacterArcMilestone[];
+  presenceByScript: {
+    scriptId: string;
+    scriptTitle: string;
+    scriptDate: string;
+    mentionCount: number;
+    dialogueCount: number;
+    intensity: number;
+    dominantEmotion: string;
+  }[];
+}
+
+export interface Lore3DConnectionWeightResult {
+  sourceId: string;
+  targetId: string;
+  sourceTitle?: string;
+  targetTitle?: string;
+  weight: number; // 0.1 to 1.0
+  thematicKeywordOverlap: string[];
+  characterCoOccurrences: string[];
+  reason: string;
+  narrativeSignificance: string;
+}
+
+export interface Lore3DGraphWeightsReport {
+  generatedAt: string;
+  totalConnectionsAnalyzed: number;
+  connections: Lore3DConnectionWeightResult[];
+  narrativeSummary: string;
+  primaryNarrativeHubs: string[];
+}
+
+export interface LoreQueryCitation {
+  sourceType: 'lore' | 'transcript';
+  id: string;
+  title: string;
+  quoteOrSnippet: string;
+  relevanceScore: number;
+}
+
+export interface LoreQueryResponse {
+  query: string;
+  summary: string;
+  narrativeContext: string;
+  thematicThemes: string[];
+  directEvidence: LoreQueryCitation[];
+  relatedLoreIds: string[];
+  relatedTranscriptIds: string[];
+  characterConnections: string[];
+  screenplayImplications: string;
+  confidenceScore: number;
+  generatedAt: string;
+}
+
+export interface KnowledgeInsightsReport {
+  summary: string;
+  canonStabilityScore: number; // 0-100%
+  domainBreakdown: Record<string, number>;
+  contradictions: KnowledgeInsightContradiction[];
+  recommendedActionPlan: string[];
+  analyzedAt: string;
 }
   
 declare global {

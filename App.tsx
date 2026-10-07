@@ -1,6 +1,6 @@
 
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { DashboardStudio } from './components/DashboardStudio';
 import { ProjectsStudio } from './components/ProjectsStudio';
@@ -51,10 +51,11 @@ import { DesignStudio } from './components/DesignStudio';
 import { ArtStudio } from './components/ArtStudio';
 import { RosterStudio } from './components/RosterStudio';
 import { VoiceLab } from './components/VoiceLab.tsx';
+import { VoiceCommandLogPanel } from './components/VoiceCommandLogPanel.tsx';
 import { ImageModal } from './components/ImageModal.tsx';
 import { LiveStudio } from './components/LiveStudio.tsx';
 import { TranscriptionStudio } from './components/TranscriptionStudio.tsx';
-import { Agent, Project, ActiveView, ImageState } from './types';
+import { Agent, Project, ActiveView, ImageState, VoiceCommandLogEntry } from './types';
 import { getHfApiKey, getTopazApiKey, saveHfApiKey, saveTopazApiKey, getVoiceLabUrl, saveVoiceLabUrl, getDolphinUrl, saveDolphinUrl, getCinematicCoreUrl, saveCinematicCoreUrl, getCameraDollyUrl, saveCameraDollyUrl } from './services/apiKeyService';
 import { getAnimAgentsTeam } from './services/agentService';
 import { vectorDb } from './services/vectorDbService';
@@ -206,6 +207,138 @@ export const App = () => {
     const [isVoiceRecording, setIsVoiceRecording] = useState<boolean>(false);
     const [recordingSeconds, setRecordingSeconds] = useState<number>(0);
 
+    // Initial 10 Transcribed Voice Commands Log with persistence
+    const INITIAL_VOICE_COMMAND_LOGS: VoiceCommandLogEntry[] = [
+        { id: 'vcmd_1', transcript: 'Take me to Lore Studio', commandName: 'Take me to Lore Studio', status: 'executed', actionDescription: 'Navigated to Lore Studio', targetView: 'lore', timestamp: Date.now() - 1000 * 60 * 2 },
+        { id: 'vcmd_2', transcript: 'Take me to Dashboard', commandName: 'Take me to Dashboard', status: 'executed', actionDescription: 'Navigated to Dashboard', targetView: 'dashboard', timestamp: Date.now() - 1000 * 60 * 5 },
+        { id: 'vcmd_3', transcript: 'Take me to Voice Lab', commandName: 'Take me to Voice Lab', status: 'executed', actionDescription: 'Navigated to Voice Lab', targetView: 'voice-lab', timestamp: Date.now() - 1000 * 60 * 9 },
+        { id: 'vcmd_4', transcript: 'Start recording session', commandName: 'Start Recording Session', status: 'executed', actionDescription: 'Triggered Audio Recording', timestamp: Date.now() - 1000 * 60 * 14 },
+        { id: 'vcmd_5', transcript: 'Stop recording session', commandName: 'Stop Recording Session', status: 'executed', actionDescription: 'Saved Audio Recording', timestamp: Date.now() - 1000 * 60 * 18 },
+        { id: 'vcmd_6', transcript: 'Take me to Characters', commandName: 'Take me to Characters', status: 'executed', actionDescription: 'Navigated to Characters', targetView: 'characters', timestamp: Date.now() - 1000 * 60 * 25 },
+        { id: 'vcmd_7', transcript: 'Open asset vault', commandName: 'Take me to Asset Vault', status: 'executed', actionDescription: 'Navigated to Asset Vault', targetView: 'grid', timestamp: Date.now() - 1000 * 60 * 32 },
+        { id: 'vcmd_8', transcript: 'Zoom in on sector 4', commandName: 'Unrecognized Directive', status: 'unrecognized', actionDescription: 'No routing handler matched "Zoom in on sector 4"', timestamp: Date.now() - 1000 * 60 * 41 },
+        { id: 'vcmd_9', transcript: 'Take me to Scripts Bin', commandName: 'Take me to Scripts Bin', status: 'executed', actionDescription: 'Navigated to Scripts Bin', targetView: 'scripts-bin', timestamp: Date.now() - 1000 * 60 * 55 },
+        { id: 'vcmd_10', transcript: 'Switch to director camera', commandName: 'Unrecognized Directive', status: 'unrecognized', actionDescription: 'No routing handler matched "Switch to director camera"', timestamp: Date.now() - 1000 * 60 * 68 }
+    ];
+
+    const [voiceCommandLogs, setVoiceCommandLogs] = useState<VoiceCommandLogEntry[]>(() => {
+        try {
+            const cached = localStorage.getItem('mythos_voice_command_logs_v1');
+            if (cached) {
+                const parsed = JSON.parse(cached);
+                if (Array.isArray(parsed) && parsed.length > 0) return parsed.slice(0, 10);
+            }
+        } catch (e) {
+            console.warn("Could not read voice command logs from localStorage:", e);
+        }
+        return INITIAL_VOICE_COMMAND_LOGS;
+    });
+
+    const handleClearVoiceCommandLogs = () => {
+        setVoiceCommandLogs(INITIAL_VOICE_COMMAND_LOGS);
+        try {
+            localStorage.setItem('mythos_voice_command_logs_v1', JSON.stringify(INITIAL_VOICE_COMMAND_LOGS));
+        } catch (e) {}
+    };
+
+    const executeVoiceCommand = useCallback((rawTranscript: string) => {
+        const transcript = rawTranscript.trim().toLowerCase();
+        let matched = true;
+        let commandName = '';
+        let actionDesc = '';
+        let targetView: string | undefined = undefined;
+
+        if (transcript.includes('dashboard')) {
+            targetView = 'dashboard';
+            commandName = "Take me to Dashboard";
+            actionDesc = "Navigated to Dashboard";
+        } else if (transcript.includes('lore') || transcript.includes('go to lore')) {
+            targetView = 'lore';
+            commandName = "Take me to Lore Studio";
+            actionDesc = "Navigated to Lore Studio";
+        } else if (transcript.includes('characters')) {
+            targetView = 'characters';
+            commandName = "Take me to Characters";
+            actionDesc = "Navigated to Characters";
+        } else if (transcript.includes('prompt library') || transcript.includes('go to prompt')) {
+            targetView = 'prompt-library';
+            commandName = "Take me to Prompt Library";
+            actionDesc = "Navigated to Prompt Library";
+        } else if (transcript.includes('settings')) {
+            targetView = 'model-settings';
+            commandName = "Take me to Settings";
+            actionDesc = "Navigated to Settings";
+        } else if (transcript.includes('transcription')) {
+            targetView = 'transcription-studio';
+            commandName = "Take me to Transcription";
+            actionDesc = "Navigated to Transcription";
+        } else if (transcript.includes('voice command log') || transcript.includes('command log')) {
+            targetView = 'voice-command-log';
+            commandName = "Take me to Voice Command Log";
+            actionDesc = "Navigated to Voice Command Log";
+        } else if (transcript.includes('voice lab') || transcript.includes('voice-lab')) {
+            targetView = 'voice-lab';
+            commandName = "Take me to Voice Lab";
+            actionDesc = "Navigated to Voice Lab";
+        } else if (transcript.includes('dubbing')) {
+            targetView = 'dubbing-studio';
+            commandName = "Take me to Dubbing Studio";
+            actionDesc = "Navigated to Dubbing Studio";
+        } else if (transcript.includes('vault') || transcript.includes('assets') || transcript.includes('grid')) {
+            targetView = 'grid';
+            commandName = "Take me to Asset Vault";
+            actionDesc = "Navigated to Asset Vault";
+        } else if (transcript.includes('scripts')) {
+            targetView = 'scripts-bin';
+            commandName = "Take me to Scripts Bin";
+            actionDesc = "Navigated to Scripts Bin";
+        } else if (transcript.includes('team')) {
+            targetView = 'team';
+            commandName = "Take me to Team";
+            actionDesc = "Navigated to Team";
+        } else if (transcript.includes('start recording')) {
+            triggerStartVoiceRecording();
+            commandName = "Start Recording Session";
+            actionDesc = "Triggered Audio Recording";
+        } else if (transcript.includes('stop recording')) {
+            triggerStopVoiceRecording();
+            commandName = "Stop Recording Session";
+            actionDesc = "Stopped and Saved Audio Recording";
+        } else {
+            matched = false;
+            commandName = "Unrecognized Directive";
+            actionDesc = `No routing handler matched "${rawTranscript}"`;
+        }
+
+        if (targetView) {
+            setActiveView(targetView as any);
+        }
+
+        if (matched) {
+            setLastSpokenCommand(commandName);
+            setFlashVoiceCommand(true);
+            setTimeout(() => setFlashVoiceCommand(false), 3000);
+        }
+
+        const newEntry: VoiceCommandLogEntry = {
+            id: `vcmd_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+            transcript: rawTranscript,
+            commandName: commandName || rawTranscript,
+            status: matched ? 'executed' : 'unrecognized',
+            actionDescription: actionDesc,
+            targetView,
+            timestamp: Date.now()
+        };
+
+        setVoiceCommandLogs(prev => {
+            const next = [newEntry, ...prev.filter(c => c.id !== newEntry.id)].slice(0, 10);
+            try {
+                localStorage.setItem('mythos_voice_command_logs_v1', JSON.stringify(next));
+            } catch (e) {}
+            return next;
+        });
+    }, []);
+
     const voiceRecorderRef = useRef<MediaRecorder | null>(null);
     const voiceChunksRef = useRef<Blob[]>([]);
     const recordingTimerRef = useRef<any>(null);
@@ -345,59 +478,9 @@ export const App = () => {
 
         recognition.onresult = (event: any) => {
             const lastIndex = event.results.length - 1;
-            const transcript = event.results[lastIndex][0].transcript.trim().toLowerCase();
+            const transcript = event.results[lastIndex][0].transcript.trim();
             console.log("[HANDS-FREE TRIGGER]:", transcript);
-
-            // Command parsing router
-            let matched = true;
-            if (transcript.includes('dashboard')) {
-                setActiveView('dashboard');
-                setLastSpokenCommand("Take me to Dashboard");
-            } else if (transcript.includes('lore') || transcript.includes('go to lore')) {
-                setActiveView('lore');
-                setLastSpokenCommand("Take me to Lore Studio");
-            } else if (transcript.includes('characters')) {
-                setActiveView('characters');
-                setLastSpokenCommand("Take me to Characters");
-            } else if (transcript.includes('prompt library') || transcript.includes('go to prompt')) {
-                setActiveView('prompt-library');
-                setLastSpokenCommand("Take me to Prompt Library");
-            } else if (transcript.includes('settings')) {
-                setActiveView('model-settings');
-                setLastSpokenCommand("Take me to Settings");
-            } else if (transcript.includes('transcription')) {
-                setActiveView('transcription-studio');
-                setLastSpokenCommand("Take me to Transcription");
-            } else if (transcript.includes('voice lab') || transcript.includes('voice-lab')) {
-                setActiveView('voice-lab');
-                setLastSpokenCommand("Take me to Voice Lab");
-            } else if (transcript.includes('dubbing')) {
-                setActiveView('dubbing-studio');
-                setLastSpokenCommand("Take me to Dubbing Studio");
-            } else if (transcript.includes('vault') || transcript.includes('assets') || transcript.includes('grid')) {
-                setActiveView('grid');
-                setLastSpokenCommand("Take me to Asset Vault");
-            } else if (transcript.includes('scripts')) {
-                setActiveView('scripts-bin');
-                setLastSpokenCommand("Take me to Scripts Bin");
-            } else if (transcript.includes('team')) {
-                setActiveView('team');
-                setLastSpokenCommand("Take me to Team");
-            } else if (transcript.includes('start recording')) {
-                triggerStartVoiceRecording();
-                setLastSpokenCommand("Start Recording Session");
-            } else if (transcript.includes('stop recording')) {
-                triggerStopVoiceRecording();
-                setLastSpokenCommand("Stop Recording Session");
-            } else {
-                matched = false;
-            }
-
-            if (matched) {
-                setFlashVoiceCommand(true);
-                const timer = setTimeout(() => setFlashVoiceCommand(false), 3000);
-                return () => clearTimeout(timer);
-            }
+            executeVoiceCommand(transcript);
         };
 
         recognition.onerror = (err: any) => {
@@ -442,7 +525,13 @@ export const App = () => {
 
     // Firebase Auth and Firestore Initialization
     useEffect(() => {
+        // Fallback safety timeout so app always mounts even if offline or Firebase auth is delayed
+        const authTimeout = setTimeout(() => {
+            setAuthLoading(false);
+        }, 1500);
+
         const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+            clearTimeout(authTimeout);
             if (firebaseUser) {
                 setUser(firebaseUser);
                 setAuthLoading(true);
@@ -844,7 +933,27 @@ export const App = () => {
             
             // Audio
             case 'live-studio': return <LiveStudio agents={project.data.agents} />;
-            case 'voice-lab': return <VoiceLab agents={project.data.agents} />;
+            case 'voice-lab': return (
+                <VoiceLab
+                    agents={project.data.agents}
+                    voiceCommands={voiceCommandLogs}
+                    voiceAssistantActive={voiceAssistantActive}
+                    onToggleVoiceAssistant={() => setVoiceAssistantActive(!voiceAssistantActive)}
+                    onNavigate={handleNavigate}
+                    onSimulateCommand={executeVoiceCommand}
+                    onClearLogs={handleClearVoiceCommandLogs}
+                />
+            );
+            case 'voice-command-log': return (
+                <VoiceCommandLogPanel
+                    voiceCommands={voiceCommandLogs}
+                    voiceAssistantActive={voiceAssistantActive}
+                    onToggleVoiceAssistant={() => setVoiceAssistantActive(!voiceAssistantActive)}
+                    onNavigate={handleNavigate}
+                    onSimulateCommand={executeVoiceCommand}
+                    onClearLogs={handleClearVoiceCommandLogs}
+                />
+            );
             case 'transcription-studio': return (
                 <TranscriptionStudio
                     transcripts={project.data.transcripts || []}
@@ -862,7 +971,16 @@ export const App = () => {
 
             // Assets
             case 'grid': return <ImageGrid images={project.data.images} isLoading={false} error={null} onViewImage={() => {}} gridOverlay='none' onGridOverlayChange={() => {}} onEditImage={() => {}} onAddToStoryboard={handleAddToStoryboard} onAddToInspiration={handleAddToInspiration} onUpscaleImage={() => {}} agents={project.data.agents} onAssignAgentToImage={(iid, aid) => updateProjectData({ images: project.data.images.map(i => i.id === iid ? { ...i, agentId: aid || undefined } : i) })} onCreateAgent={(d) => { const newAgent = { ...d, id: `agent_${Date.now()}` } as Agent; updateProjectData({ agents: [...project.data.agents, newAgent] }); return newAgent; }} agentFilter={agentFilter} onAgentFilterChange={setAgentFilter} awaitingExternalGeneration={false} showGridSelectors={false} onUploadImage={handleAddAssetToGrid} onUpdateImages={(newImages) => updateProjectData({ images: newImages })} />;
-            case 'story': return <Storyboard frames={project.data.storyboard} onUpdateNote={(id, notes) => updateProjectData({ storyboard: project.data.storyboard.map(f => f.id === id ? { ...f, notes } : f) })} onRemove={(id) => updateProjectData({ storyboard: project.data.storyboard.filter(f => f.id !== id) })} onReorder={(s, e) => { const list = [...project.data.storyboard]; const [removed] = list.splice(s, 1); list.splice(e, 0, removed); updateProjectData({ storyboard: list }); }} />;
+            case 'story': return (
+                <Storyboard 
+                    frames={project.data.storyboard} 
+                    projectName={project.name}
+                    onUpdateNote={(id, notes) => updateProjectData({ storyboard: project.data.storyboard.map(f => f.id === id ? { ...f, notes } : f) })} 
+                    onRemove={(id) => updateProjectData({ storyboard: project.data.storyboard.filter(f => f.id !== id) })} 
+                    onReorder={(s, e) => { const list = [...project.data.storyboard]; const [removed] = list.splice(s, 1); list.splice(e, 0, removed); updateProjectData({ storyboard: list }); }} 
+                    onUpdateFrame={(id, updates) => updateProjectData({ storyboard: project.data.storyboard.map(f => f.id === id ? { ...f, ...updates } : f) })}
+                />
+            );
             case 'inspiration': return <InspirationBoard images={project.data.inspirationImages} onUpload={(f) => { const r = new FileReader(); r.onload = e => handleAddToInspiration((e.target?.result as string).split(',')[1]); r.readAsDataURL(f); }} onRemove={(id) => updateProjectData({ inspirationImages: project.data.inspirationImages.filter(i => i.id !== id) })} onUseAsGuide={() => {}} />;
             case 'scripts-bin': return <ScriptingStudio agent={coreAgent('agent-scripting')} onNavigate={handleNavigate} onOpenChat={(mode) => openChatModal(coreAgent('agent-scripting'), mode)} scriptText={project.data.scriptText} scriptsBin={project.data.scriptsBin} onDeleteScript={(id) => updateProjectData({ scriptsBin: project.data.scriptsBin.filter(s => s.id !== id) })} onScriptUpload={(f) => { const r = new FileReader(); r.onload = e => updateProjectData({ scriptText: e.target?.result as string }); r.readAsText(f); }} defaultTab="bin" />;
             
@@ -956,6 +1074,7 @@ export const App = () => {
             case 'bigger-pics-studio': return { breadcrumbs: [pBreadcrumb, { label: 'Bigger Pics Studio' }] };
             case 'live-studio': return { breadcrumbs: [pBreadcrumb, { label: 'Live Studio' }] };
             case 'voice-lab': return { breadcrumbs: [pBreadcrumb, { label: 'Voice Lab' }] };
+            case 'voice-command-log': return { breadcrumbs: [pBreadcrumb, { label: 'Voice Command Log' }] };
             case 'dubbing-studio': return { breadcrumbs: [pBreadcrumb, { label: 'Dubbing Studio' }] };
             case 'grid': return { breadcrumbs: [pBreadcrumb, { label: 'Asset Vault' }] };
             case 'story': return { breadcrumbs: [pBreadcrumb, { label: 'Storyboard' }] };

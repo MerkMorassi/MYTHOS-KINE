@@ -16,12 +16,10 @@
       window.process = window.process || { env: { API_KEY: "" } };
       
       window.onerror = function (message, source, lineno, colno, error) {
-        console.error("System Fault:", message, "at", source, ":", lineno);
-        const display = document.getElementById('critical-error-display');
-        if (display) {
-            display.style.display = 'flex';
-            const msgEl = display.querySelector('.error-msg');
-            if (msgEl) msgEl.textContent = message;
+        console.warn("System Log:", message, "at", source, ":", lineno);
+        // Benign warnings like ResizeObserver should never block execution
+        if (typeof message === 'string' && (message.includes('ResizeObserver') || message.includes('Script error'))) {
+          return true;
         }
         return false;
       };
@@ -45,24 +43,6 @@
         },
       };
     </script>
-    <script type="importmap">
-{
-  "imports": {
-    "react": "https://esm.sh/react@19.0.0",
-    "react-dom": "https://esm.sh/react-dom@19.0.0",
-    "react-dom/client": "https://esm.sh/react-dom@19.0.0/client",
-    "@google/genai": "https://esm.sh/@google/genai@1.34.0",
-    "@huggingface/inference": "https://esm.sh/@huggingface/inference@4.13.5",
-    "@gradio/client": "https://esm.sh/@gradio/client@2.0.1",
-    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
-    "react/": "https://esm.sh/react@^19.2.3/",
-    "path": "https://esm.sh/path@^0.12.7",
-    "vite": "https://esm.sh/vite@^7.3.0",
-    "@vitejs/plugin-react": "https://esm.sh/@vitejs/plugin-react@^5.1.2",
-    "url": "https://esm.sh/url@^0.11.4"
-  }
-}
-</script>
     <style>
       body { background-color: #0a0a0a; color: #e5e5e5; margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif; }
       ::-webkit-scrollbar { width: 8px; height: 8px; }

@@ -47,6 +47,45 @@ function cosineSimilarity(vecA, vecB) {
     return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
 }
 
+// Server-side Dynamic Wait Timer & Exponential Backoff for Gemini calls
+async function callGeminiWithDynamicRetry(fn, taskName = 'Server Gemini Operation', maxRetries = 4) {
+    let lastError = null;
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+        try {
+            return await fn();
+        } catch (error) {
+            lastError = error;
+            const msg = (error?.message || String(error || '')).toLowerCase();
+            const status = error?.status || error?.code || error?.statusCode;
+
+            if (status === 401 || status === 403 || msg.includes('api_key_invalid')) {
+                throw error;
+            }
+
+            if (attempt === maxRetries - 1) {
+                console.error(`[${taskName}] All ${maxRetries} attempts exhausted:`, msg);
+                throw error;
+            }
+
+            // Dynamic delay: 429 -> exponential; 500 -> immediate (150ms); 503 -> moderate
+            let delayMs = 1500;
+            if (status === 429 || msg.includes('429') || msg.includes('quota') || msg.includes('rate limit') || msg.includes('resource_exhausted')) {
+                delayMs = Math.round(Math.min(30000, 2500 * Math.pow(2, attempt)) * (0.8 + Math.random() * 0.4));
+                console.warn(`[${taskName}] 429 Quota/Rate Limit. Applying exponential backoff: retrying in ${(delayMs / 1000).toFixed(1)}s...`);
+            } else if (status === 500 || status === 502 || msg.includes('500') || msg.includes('internal')) {
+                delayMs = Math.round(150 + Math.random() * 150);
+                console.warn(`[${taskName}] 500 Internal Error. Applying immediate retry in ${delayMs}ms...`);
+            } else {
+                delayMs = Math.round(Math.min(20000, 1200 * Math.pow(1.5, attempt)) * (0.8 + Math.random() * 0.4));
+                console.warn(`[${taskName}] Transient error. Retrying in ${(delayMs / 1000).toFixed(1)}s...`);
+            }
+
+            await new Promise(r => setTimeout(r, delayMs));
+        }
+    }
+    throw lastError;
+}
+
 // --- RAG API ENDPOINT ---
 // This is what the Automation Studio "Localhost RAG API URL" points to.
 app.post('/api/rag', async (req, res) => {
@@ -170,13 +209,15 @@ Return a JSON object in this EXACT format:
 Items to process:
 ${JSON.stringify(items, null, 2)}`;
 
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: prompt,
-            config: {
-                responseMimeType: "application/json"
-            }
-        });
+        const response = await callGeminiWithDynamicRetry(async () => {
+            return await ai.models.generateContent({
+                model: 'gemini-2.5-flash',
+                contents: prompt,
+                config: {
+                    responseMimeType: "application/json"
+                }
+            });
+        }, 'Batch Categorization');
 
         const textResponse = response.text;
         const parsed = JSON.parse(textResponse);

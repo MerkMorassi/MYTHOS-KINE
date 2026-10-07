@@ -6,6 +6,7 @@ interface LoreNetworkProps {
     lore: LoreEntry[];
     characters: Character[];
     activeProjectId: string;
+    onSwitchTo3D?: () => void;
 }
 
 interface NetworkNode extends d3.SimulationNodeDatum {
@@ -20,7 +21,20 @@ interface NetworkLink extends d3.SimulationLinkDatum<NetworkNode> {
     source: string | NetworkNode;
     target: string | NetworkNode;
     similarity: number;
+    isSameCluster?: boolean;
+    clusterColor?: string;
 }
+
+export const CLUSTER_THEME_PALETTE = [
+    { color: '#8b5cf6', fill: 'rgba(139, 92, 246, 0.12)', stroke: '#8b5cf6', hex: '#8b5cf6', badge: 'bg-purple-950 text-purple-300 border-purple-800' },
+    { color: '#3b82f6', fill: 'rgba(59, 130, 246, 0.12)', stroke: '#3b82f6', hex: '#3b82f6', badge: 'bg-blue-950 text-blue-300 border-blue-800' },
+    { color: '#10b981', fill: 'rgba(16, 185, 129, 0.12)', stroke: '#10b981', hex: '#10b981', badge: 'bg-emerald-950 text-emerald-300 border-emerald-800' },
+    { color: '#f59e0b', fill: 'rgba(245, 158, 11, 0.12)', stroke: '#f59e0b', hex: '#f59e0b', badge: 'bg-amber-950 text-amber-300 border-amber-800' },
+    { color: '#f43f5e', fill: 'rgba(244, 63, 94, 0.12)', stroke: '#f43f5e', hex: '#f43f5e', badge: 'bg-rose-950 text-rose-300 border-rose-800' },
+    { color: '#06b6d4', fill: 'rgba(6, 182, 212, 0.12)', stroke: '#06b6d4', hex: '#06b6d4', badge: 'bg-cyan-950 text-cyan-300 border-cyan-800' },
+    { color: '#ec4899', fill: 'rgba(236, 72, 153, 0.12)', stroke: '#ec4899', hex: '#ec4899', badge: 'bg-pink-950 text-pink-300 border-pink-800' },
+    { color: '#6366f1', fill: 'rgba(99, 102, 241, 0.12)', stroke: '#6366f1', hex: '#6366f1', badge: 'bg-indigo-950 text-indigo-300 border-indigo-800' }
+];
 
 const CATEGORY_COLORS = {
     character: { bg: 'bg-purple-600', text: 'text-purple-400', border: 'border-purple-500', hex: '#a855f7' },
@@ -68,7 +82,7 @@ const cosineSimilarity = (vecA: number[], vecB: number[]): number => {
     return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
 };
 
-export const LoreNetwork: React.FC<LoreNetworkProps> = ({ lore, characters, activeProjectId }) => {
+export const LoreNetwork: React.FC<LoreNetworkProps> = ({ lore, characters, activeProjectId, onSwitchTo3D }) => {
     const svgRef = useRef<SVGSVGElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const tooltipRef = useRef<HTMLDivElement>(null);
@@ -77,6 +91,8 @@ export const LoreNetwork: React.FC<LoreNetworkProps> = ({ lore, characters, acti
     const [threshold, setThreshold] = useState<number>(0.45);
     const [searchQuery, setSearchQuery] = useState<string>('');
     const [selectedNode, setSelectedNode] = useState<NetworkNode | null>(null);
+    const [graphViewMode, setGraphViewMode] = useState<'relational' | 'thematic-clusters'>('relational');
+    const [activeClusterFilter, setActiveClusterFilter] = useState<string | null>(null);
     const [filterTypes, setFilterTypes] = useState<Record<string, boolean>>({
         character: true,
         location: true,
@@ -276,9 +292,65 @@ export const LoreNetwork: React.FC<LoreNetworkProps> = ({ lore, characters, acti
         }
     };
 
-    // Filter nodes based on checkboxes and search query
+    // Helper to extract metadata cluster for each node
+    const getNodeClusterName = (nodeId: string, nodeType: string, nodeTitle: string, nodeDetails?: string): string => {
+        const l = lore.find(x => x.id === nodeId);
+        if (l) {
+            if (l.cluster && l.cluster.trim()) return l.cluster.trim();
+            if (l.tags && l.tags.length > 0 && l.tags[0].trim()) {
+                const tag = l.tags[0].trim();
+                return tag.charAt(0).toUpperCase() + tag.slice(1);
+            }
+            const cat = categorizeLore(l.title, l.content);
+            if (cat === 'location') return 'Geographic Realms & Strongholds';
+            if (cat === 'event') return 'Historical Battles & Chronology';
+            return 'Relics & Mythic Artifacts';
+        }
+        const c = characters.find(x => x.id === nodeId);
+        if (c) {
+            if (c.cluster && c.cluster.trim()) return c.cluster.trim();
+            if (c.archetype && c.archetype.trim()) return `${c.archetype} Archetype`;
+            if (c.tags && c.tags.length > 0 && c.tags[0].trim()) {
+                const tag = c.tags[0].trim();
+                return tag.charAt(0).toUpperCase() + tag.slice(1);
+            }
+            return 'Character Protagonists & Allies';
+        }
+        return 'General Canon';
+    };
+
+    // Calculate metadata cluster groups and density percentages
+    const clustersList = React.useMemo(() => {
+        const map: Record<string, NetworkNode[]> = {};
+        allNodes.forEach(n => {
+            const clName = getNodeClusterName(n.id, n.type, n.name, n.details);
+            if (!map[clName]) map[clName] = [];
+            map[clName].push(n);
+        });
+        const total = Math.max(1, allNodes.length);
+        return Object.entries(map).map(([name, nodes], idx) => {
+            const pal = CLUSTER_THEME_PALETTE[idx % CLUSTER_THEME_PALETTE.length];
+            return {
+                id: name,
+                name,
+                nodes,
+                count: nodes.length,
+                densityPct: Math.round((nodes.length / total) * 100),
+                color: pal.color,
+                fill: pal.fill,
+                stroke: pal.stroke,
+                hex: pal.hex,
+                badge: pal.badge
+            };
+        }).sort((a, b) => b.count - a.count);
+    }, [allNodes, lore, characters]);
+
+    // Filter nodes based on checkboxes, active cluster, and search query
     const filteredNodes = allNodes.filter(node => {
         if (!filterTypes[node.type]) return false;
+        if (activeClusterFilter && getNodeClusterName(node.id, node.type, node.name, node.details) !== activeClusterFilter) {
+            return false;
+        }
         if (searchQuery.trim() !== '') {
             const q = searchQuery.toLowerCase();
             return node.name.toLowerCase().includes(q) || (node.details || '').toLowerCase().includes(q);
@@ -296,15 +368,30 @@ export const LoreNetwork: React.FC<LoreNetworkProps> = ({ lore, characters, acti
                 const vecU = embeddings[u.id];
                 const vecV = embeddings[v.id];
 
+                const clusterU = getNodeClusterName(u.id, u.type, u.name, u.details);
+                const clusterV = getNodeClusterName(v.id, v.type, v.name, v.details);
+                const isSameCluster = clusterU === clusterV;
+                const clusterMatch = clustersList.find(c => c.name === clusterU);
+
                 if (vecU && vecV) {
                     const similarity = cosineSimilarity(vecU, vecV);
-                    if (similarity >= threshold) {
+                    if (similarity >= threshold || (graphViewMode === 'thematic-clusters' && isSameCluster && similarity >= threshold * 0.75)) {
                         links.push({
                             source: u.id,
                             target: v.id,
-                            similarity
+                            similarity,
+                            isSameCluster,
+                            clusterColor: clusterMatch ? clusterMatch.color : '#818cf8'
                         });
                     }
+                } else if (graphViewMode === 'thematic-clusters' && isSameCluster) {
+                    links.push({
+                        source: u.id,
+                        target: v.id,
+                        similarity: 0.8,
+                        isSameCluster: true,
+                        clusterColor: clusterMatch ? clusterMatch.color : '#818cf8'
+                    });
                 }
             }
         }
@@ -357,6 +444,7 @@ export const LoreNetwork: React.FC<LoreNetworkProps> = ({ lore, characters, acti
         // Setup force simulation
         const nodesData = filteredNodes.map(d => {
             const copy = { ...d } as any;
+            copy.clusterName = getNodeClusterName(d.id, d.type, d.name, d.details);
             const saved = nodePositionsRef.current[d.id];
             if (saved && typeof saved.x === 'number' && typeof saved.y === 'number') {
                 copy.x = saved.x;
@@ -374,15 +462,87 @@ export const LoreNetwork: React.FC<LoreNetworkProps> = ({ lore, characters, acti
             return {
                 source: nodesData.find(n => n.id === srcId)!,
                 target: nodesData.find(n => n.id === tgtId)!,
-                similarity: l.similarity
+                similarity: l.similarity,
+                isSameCluster: l.isSameCluster,
+                clusterColor: l.clusterColor
             };
         }).filter(l => l.source && l.target);
 
-        const simulation = d3.forceSimulation(nodesData as any)
-            .force("link", d3.forceLink(linksData).distance(130).strength(0.5))
-            .force("charge", d3.forceManyBody().strength(-280))
-            .force("center", d3.forceCenter(width / 2, height / 2))
-            .force("collision", d3.forceCollide().radius(40));
+        const isClusterMode = graphViewMode === 'thematic-clusters';
+
+        // Calculate cluster centroids across 2D canvas for thematic density clustering
+        const clusterCentroids: Record<string, { x: number; y: number }> = {};
+        if (isClusterMode) {
+            const numClusters = Math.max(1, clustersList.length);
+            const radius = Math.min(width, height) * 0.33;
+            clustersList.forEach((cl, idx) => {
+                const angle = (idx / numClusters) * 2 * Math.PI - Math.PI / 2;
+                clusterCentroids[cl.name] = {
+                    x: width / 2 + Math.cos(angle) * radius,
+                    y: height / 2 + Math.sin(angle) * radius
+                };
+            });
+
+            // Draw 2D density background contours and cluster identity hubs
+            const clusterBgGroup = containerGroup.append("g").attr("class", "thematic-clusters-bg");
+            clustersList.forEach(cl => {
+                const centroid = clusterCentroids[cl.name];
+                if (!centroid) return;
+                const bubbleRadius = Math.max(65, Math.min(185, Math.sqrt(cl.count) * 44));
+                const g = clusterBgGroup.append("g").attr("class", "cluster-bubble");
+
+                // Translucent density hull circle
+                g.append("circle")
+                    .attr("cx", centroid.x)
+                    .attr("cy", centroid.y)
+                    .attr("r", bubbleRadius)
+                    .attr("fill", cl.fill)
+                    .attr("stroke", cl.stroke)
+                    .attr("stroke-width", 1.8)
+                    .attr("stroke-dasharray", "5 5")
+                    .attr("stroke-opacity", 0.65);
+
+                // Cluster Header Badge with metadata title & density index
+                const labelWidth = Math.min(220, Math.max(120, cl.name.length * 7.5 + 40));
+                g.append("rect")
+                    .attr("x", centroid.x - labelWidth / 2)
+                    .attr("y", centroid.y - bubbleRadius - 14)
+                    .attr("width", labelWidth)
+                    .attr("height", 22)
+                    .attr("rx", 11)
+                    .attr("fill", "#09090b")
+                    .attr("stroke", cl.stroke)
+                    .attr("stroke-width", 1.4);
+
+                g.append("text")
+                    .attr("x", centroid.x)
+                    .attr("y", centroid.y - bubbleRadius)
+                    .attr("text-anchor", "middle")
+                    .attr("fill", cl.color)
+                    .attr("font-size", "9.5px")
+                    .attr("font-weight", "black")
+                    .attr("letter-spacing", "0.5px")
+                    .attr("pointer-events", "none")
+                    .text(`${cl.name} (${cl.count} • ${cl.densityPct}%)`);
+            });
+        }
+
+        const simulation = d3.forceSimulation(nodesData as any);
+
+        if (isClusterMode) {
+            simulation
+                .force("clusterX", d3.forceX((d: any) => clusterCentroids[d.clusterName]?.x || width / 2).strength(0.72))
+                .force("clusterY", d3.forceY((d: any) => clusterCentroids[d.clusterName]?.y || height / 2).strength(0.72))
+                .force("charge", d3.forceManyBody().strength(-140))
+                .force("collision", d3.forceCollide().radius(36).strength(0.85))
+                .force("link", d3.forceLink(linksData).distance(75).strength(0.35));
+        } else {
+            simulation
+                .force("link", d3.forceLink(linksData).distance(130).strength(0.5))
+                .force("charge", d3.forceManyBody().strength(-280))
+                .force("center", d3.forceCenter(width / 2, height / 2))
+                .force("collision", d3.forceCollide().radius(40));
+        }
 
         // Draw Links (lines)
         const link = containerGroup.append("g")
@@ -390,9 +550,14 @@ export const LoreNetwork: React.FC<LoreNetworkProps> = ({ lore, characters, acti
             .selectAll("line")
             .data(linksData)
             .enter().append("line")
-            .attr("stroke", "url(#edge-grad)")
+            .attr("stroke", (d: any) => {
+                if (isClusterMode && d.isSameCluster && d.clusterColor) {
+                    return d.clusterColor;
+                }
+                return "url(#edge-grad)";
+            })
             .attr("stroke-width", (d: any) => Math.max(1, (d.similarity - 0.3) * 6))
-            .attr("stroke-opacity", 0.6)
+            .attr("stroke-opacity", (d: any) => isClusterMode ? (d.isSameCluster ? 0.75 : 0.12) : 0.6)
             .attr("class", "transition-all duration-300");
 
         const tooltip = d3.select(tooltipRef.current);
@@ -595,7 +760,7 @@ export const LoreNetwork: React.FC<LoreNetworkProps> = ({ lore, characters, acti
         return () => {
             simulation.stop();
         };
-    }, [filteredNodes, links, threshold]);
+    }, [filteredNodes, links, threshold, graphViewMode, activeClusterFilter]);
 
     // Gather connection lists of the currently selected element
     const directConnections = selectedNode 
@@ -627,6 +792,47 @@ export const LoreNetwork: React.FC<LoreNetworkProps> = ({ lore, characters, acti
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2">
+                        {/* 2D View Mode Toggle: Relational Graph vs Thematic Clusters */}
+                        <div className="flex items-center gap-1 bg-black/60 p-1 rounded-xl border border-neutral-800">
+                            <button
+                                type="button"
+                                onClick={() => { setGraphViewMode('relational'); setActiveClusterFilter(null); }}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                                    graphViewMode === 'relational'
+                                        ? 'bg-purple-600 text-white shadow-md'
+                                        : 'text-neutral-400 hover:text-white'
+                                }`}
+                                title="Relational Graph (Cosine Similarity Force-Directed Constellation)"
+                            >
+                                <span>🕸️</span>
+                                <span>Relational Graph</span>
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setGraphViewMode('thematic-clusters')}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                                    graphViewMode === 'thematic-clusters'
+                                        ? 'bg-indigo-600 text-white shadow-md'
+                                        : 'text-neutral-400 hover:text-white'
+                                }`}
+                                title="Thematic Clusters (2D Density Clustering by Metadata)"
+                            >
+                                <span>🧬</span>
+                                <span>Thematic Clusters</span>
+                            </button>
+                        </div>
+
+                        {onSwitchTo3D && (
+                            <button
+                                onClick={onSwitchTo3D}
+                                className="px-3.5 py-1.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold text-xs rounded-lg shadow-md transition-all flex items-center gap-1.5 cursor-pointer"
+                                title="Open 3D Force-Directed Cosmos Visualization"
+                            >
+                                <span>🪐</span>
+                                <span>Switch to 3D Cosmos</span>
+                            </button>
+                        )}
+
                         <button
                             onClick={handleDownloadMap}
                             className="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border border-neutral-700/80 font-bold text-xs rounded-lg shadow-md transition-all flex items-center gap-1.5"
@@ -673,6 +879,67 @@ export const LoreNetwork: React.FC<LoreNetworkProps> = ({ lore, characters, acti
                     <div className="bg-purple-950/20 border border-purple-500/20 p-4 rounded-lg flex items-center gap-3">
                         <div className="w-4 h-4 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
                         <span className="text-xs text-purple-300 font-medium">{computeProgress}</span>
+                    </div>
+                )}
+
+                {/* THEMATIC CLUSTERS 2D DENSITY CONTROL BAR */}
+                {graphViewMode === 'thematic-clusters' && (
+                    <div className="bg-indigo-950/30 border border-indigo-800/50 rounded-xl p-4 space-y-3 animate-fadeIn">
+                        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-indigo-900/40 pb-2.5">
+                            <div className="flex items-center gap-2">
+                                <span className="text-sm">🧬</span>
+                                <span className="text-xs font-black uppercase text-indigo-300 font-mono tracking-wider">
+                                    Thematic Density Clusters (Metadata Grouping)
+                                </span>
+                                <span className="text-[10px] text-neutral-400">
+                                    • Related lore entries and characters grouped by metadata tags, categories, and archetypes in 2D density space
+                                </span>
+                            </div>
+                            <div className="flex items-center gap-3 text-xs font-mono">
+                                <span className="text-neutral-400">
+                                    Total Clusters: <strong className="text-white">{clustersList.length}</strong>
+                                </span>
+                                {clustersList[0] && (
+                                    <span className="text-neutral-400">
+                                        Densest: <strong className="text-indigo-300">{clustersList[0].name} ({clustersList[0].densityPct}%)</strong>
+                                    </span>
+                                )}
+                                {activeClusterFilter && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setActiveClusterFilter(null)}
+                                        className="text-xs text-rose-400 hover:text-rose-300 font-bold ml-2 underline cursor-pointer"
+                                    >
+                                        ✕ Clear Filter
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Cluster Density Badges */}
+                        <div className="flex flex-wrap items-center gap-2">
+                            {clustersList.map(cl => {
+                                const isSelected = activeClusterFilter === cl.name;
+                                return (
+                                    <button
+                                        key={cl.name}
+                                        type="button"
+                                        onClick={() => setActiveClusterFilter(isSelected ? null : cl.name)}
+                                        className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border flex items-center gap-2 cursor-pointer ${
+                                            isSelected
+                                                ? 'bg-white text-black border-white shadow-lg scale-105'
+                                                : `${cl.badge} hover:brightness-125`
+                                        }`}
+                                    >
+                                        <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: cl.color }}></span>
+                                        <span>{cl.name}</span>
+                                        <span className="font-mono text-[10px] opacity-80">
+                                            {cl.count} ({cl.densityPct}%)
+                                        </span>
+                                    </button>
+                                );
+                            })}
+                        </div>
                     </div>
                 )}
 

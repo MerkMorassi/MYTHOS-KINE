@@ -5,9 +5,23 @@ import { ErrorBoundary } from './ErrorBoundary.tsx';
 import { loadMythosData } from './services/mythosData.ts';
 
 async function bootstrap() {
+  // Always dismiss loader within 1500ms at most
+  const dismissLoader = () => {
+    const loader = document.getElementById('init-loader');
+    if (loader) {
+      loader.style.opacity = '0';
+      setTimeout(() => loader.remove(), 400);
+    }
+  };
+
   try {
-    // 1. Load critical narrative data first
-    await loadMythosData();
+    // 1. Non-blocking load of narrative data with 1.2s timeout
+    await Promise.race([
+      loadMythosData(),
+      new Promise(resolve => setTimeout(resolve, 1200))
+    ]).catch(err => {
+      console.warn("Non-fatal narrative data preload timeout/failure:", err);
+    });
 
     // 2. Locate mount point
     const rootElement = document.getElementById('root');
@@ -26,16 +40,11 @@ async function bootstrap() {
     );
 
     // 4. Remove boot-time loader
-    const loader = document.getElementById('init-loader');
-    if (loader) {
-        loader.style.opacity = '0';
-        setTimeout(() => loader.remove(), 500);
-    }
+    dismissLoader();
 
   } catch (error) {
     console.error("Bootstrap Failure:", error);
-    // window.onerror will handle the UI display for this error
-    throw error;
+    dismissLoader();
   }
 }
 

@@ -19,6 +19,7 @@ import { NarrativeThread, ImageState } from '../types.ts';
 import { AssetIntelligenceCleanupModal } from './AssetIntelligenceCleanupModal';
 import { LoreWiki } from './LoreWiki';
 import { BulkRenameModal } from './BulkRenameModal';
+import { LoreDensityHeatmap2D } from './LoreDensityHeatmap2D';
 
 // Firebase Firestore Imports
 import { db, auth } from '../services/firebase';
@@ -37,7 +38,7 @@ interface KnowledgeViewProps {
     onUpdateProjectImages?: (images: ImageState[]) => void;
 }
 
-type StudioTab = 'overview' | 'vectors' | 'graph' | 'forge' | 'subgraph' | 'refinement' | 'wiki';
+type StudioTab = 'overview' | 'heatmap' | 'vectors' | 'graph' | 'forge' | 'subgraph' | 'refinement' | 'wiki';
 
 export const KnowledgeView: React.FC<KnowledgeViewProps> = ({ 
     agents, 
@@ -1545,6 +1546,7 @@ export const KnowledgeView: React.FC<KnowledgeViewProps> = ({
                 <div className="flex flex-wrap gap-1 bg-black/40 p-1 rounded-xl border border-neutral-800 w-fit">
                     {[
                         { id: 'overview', label: 'Factory' },
+                        { id: 'heatmap', label: '🔥 2D Density Heatmap' },
                         { id: 'wiki', label: '📖 Lore Wiki' },
                         { id: 'subgraph', label: '⚠️ Contradiction Subgraph' },
                         { id: 'refinement', label: '✨ AI Refinement' },
@@ -1792,167 +1794,13 @@ export const KnowledgeView: React.FC<KnowledgeViewProps> = ({
                             })()}
                         </div>
 
-                        {/* KNOWLEDGE GAP & DENSE OVERLAPS HEATMAP */}
-                        <div className="bg-neutral-900/80 border border-neutral-800 rounded-2xl p-6 backdrop-blur-md space-y-4">
-                            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-neutral-800 pb-3">
-                                <div>
-                                    <h2 className="text-sm font-black text-white uppercase tracking-widest flex items-center gap-2">
-                                        <span>🗺️</span> Thematic Overlaps & Knowledge Gaps Heatmap
-                                    </h2>
-                                    <p className="text-[10px] text-neutral-500 uppercase mt-0.5 font-bold tracking-wider">
-                                        Visualizes density clusters of project entities, flagging under-referenced items (Gaps) or dense overlays
-                                    </p>
-                                </div>
-                                <div className="flex gap-1.5 bg-black/40 p-1 rounded-xl border border-neutral-800 shrink-0">
-                                    {(['all', 'gaps', 'overlaps'] as const).map(f => (
-                                        <button
-                                            key={f}
-                                            type="button"
-                                            onClick={() => { setActiveHeatmapFilter(f); setSelectedHeatmapItem(null); }}
-                                            className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all ${
-                                                activeHeatmapFilter === f
-                                                    ? 'bg-blue-600 text-white shadow-md'
-                                                    : 'text-neutral-500 hover:text-white'
-                                            }`}
-                                        >
-                                            {f === 'all' ? 'All Entities' : f === 'gaps' ? '⚠️ Gaps Only' : '🔥 Dense Overlaps'}
-                                        </button>
-                                    ))}
-                                </div>
-                            </div>
-
-                            {(() => {
-                                if (!tripletEdges || tripletEdges.length === 0) {
-                                    return (
-                                        <div className="bg-black/10 border border-neutral-850 p-6 rounded-xl text-center text-xs text-neutral-500 italic font-sans">
-                                            No entities mapped. Build or link node triplets inside the Neural Graph or Graph Forge tabs to generate the map.
-                                        </div>
-                                    );
-                                }
-
-                                const entities = Array.from(new Set(
-                                    tripletEdges.flatMap(e => [e.s.trim(), e.o.trim()]).filter(s => s && s.length > 2)
-                                ));
-
-                                const rawItems = entities.map(name => {
-                                    const mentionsCount = vectors.filter(v => v.text.toLowerCase().includes(name.toLowerCase())).length;
-                                    const relationsCount = tripletEdges.filter(e => e.s.trim() === name || e.o.trim() === name).length;
-                                    const score = mentionsCount + relationsCount * 1.5;
-
-                                    let status: 'gap' | 'balanced' | 'overlap' = 'balanced';
-                                    if (score <= 2.5) {
-                                        status = 'gap';
-                                    } else if (score >= 9) {
-                                        status = 'overlap';
-                                    }
-
-                                    return { name, mentionsCount, relationsCount, score, status };
-                                }).sort((a, b) => b.score - a.score);
-
-                                const filteredItems = rawItems.filter(item => {
-                                    if (activeHeatmapFilter === 'gaps') return item.status === 'gap';
-                                    if (activeHeatmapFilter === 'overlaps') return item.status === 'overlap';
-                                    return true;
-                                });
-
-                                return (
-                                    <div className="space-y-4">
-                                        {filteredItems.length > 0 ? (
-                                            <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-3 max-h-72 overflow-y-auto custom-scrollbar pr-1">
-                                                {filteredItems.map((item, idx) => {
-                                                    const isSelected = selectedHeatmapItem?.name === item.name;
-                                                    return (
-                                                        <button
-                                                            key={idx}
-                                                            type="button"
-                                                            onClick={() => setSelectedHeatmapItem(item)}
-                                                            className={`p-3 rounded-xl border transition-all text-left flex flex-col justify-between h-20 relative cursor-pointer ${
-                                                                isSelected 
-                                                                    ? 'ring-2 ring-blue-500 border-blue-500 shadow-lg scale-[1.03]' 
-                                                                    : item.status === 'gap'
-                                                                        ? 'bg-rose-950/20 border-rose-900/30 hover:border-rose-700/60'
-                                                                        : item.status === 'overlap'
-                                                                            ? 'bg-purple-950/20 border-purple-900/30 hover:border-purple-700/60'
-                                                                            : 'bg-black/20 border-neutral-800 hover:border-neutral-700'
-                                                            }`}
-                                                        >
-                                                            <div className="w-full">
-                                                                <div className="flex justify-between items-center w-full">
-                                                                    <span className={`text-[7px] font-black uppercase px-1 rounded border font-mono ${
-                                                                        item.status === 'gap'
-                                                                            ? 'bg-red-950 text-red-400 border-red-900/20 animate-pulse'
-                                                                            : item.status === 'overlap'
-                                                                                ? 'bg-purple-950 text-purple-400 border-purple-900/20 font-black'
-                                                                                : 'bg-neutral-850 text-neutral-400 border-neutral-700/40'
-                                                                    }`}>
-                                                                        {item.status === 'gap' ? 'Gap' : item.status === 'overlap' ? 'Hub' : 'Core'}
-                                                                    </span>
-                                                                    <span className="text-[9px] font-bold text-neutral-400 font-mono">
-                                                                        {item.score.toFixed(1)}
-                                                                    </span>
-                                                                </div>
-                                                                <h4 className="text-[10px] font-black text-neutral-200 mt-1 truncate w-full font-mono" title={item.name}>
-                                                                    {item.name}
-                                                                </h4>
-                                                            </div>
-                                                            <span className="text-[8px] text-neutral-500 font-mono truncate block w-full">
-                                                                {item.mentionsCount} mentions • {item.relationsCount} rels
-                                                            </span>
-                                                        </button>
-                                                    );
-                                                })}
-                                            </div>
-                                        ) : (
-                                            <p className="text-xs text-neutral-500 italic text-center py-4 font-sans">
-                                                No entities matched this filter.
-                                            </p>
-                                        )}
-
-                                        {/* HEATMAP DETAILED INSPECTOR CARD */}
-                                        {selectedHeatmapItem && (
-                                            <div className="bg-black/35 border border-neutral-800 rounded-xl p-4 space-y-2 animate-scale-up font-sans">
-                                                <div className="flex justify-between items-start pb-2 border-b border-neutral-850">
-                                                    <div>
-                                                        <span className="text-[8px] font-black uppercase text-blue-400 tracking-wider font-mono">Integrative Heatmap Analysis</span>
-                                                        <h4 className="text-xs font-black text-white mt-0.5 font-mono">{selectedHeatmapItem.name}</h4>
-                                                    </div>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => setSelectedHeatmapItem(null)}
-                                                        className="text-neutral-500 hover:text-white text-xs cursor-pointer font-sans"
-                                                    >
-                                                        ✕ Close Inspector
-                                                    </button>
-                                                </div>
-                                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs font-mono pt-1 text-neutral-400">
-                                                    <div>
-                                                        Mentions In Documents: <span className="text-white font-bold">{selectedHeatmapItem.mentionsCount} times</span>
-                                                    </div>
-                                                    <div>
-                                                        Relationships Defined: <span className="text-white font-bold">{selectedHeatmapItem.relationsCount} links</span>
-                                                    </div>
-                                                    <div>
-                                                        Thematic Integration Index: <span className="text-white font-bold">{selectedHeatmapItem.score.toFixed(1)} pts</span>
-                                                    </div>
-                                                </div>
-                                                <div className="pt-2 border-t border-neutral-850/50 flex gap-2 items-center text-xs">
-                                                    <span className="text-[9px] font-black uppercase tracking-widest text-neutral-500 font-mono">Integration Status:</span>
-                                                    <p className="text-neutral-300 leading-normal text-xs font-sans">
-                                                        {selectedHeatmapItem.status === 'gap' ? (
-                                                            <span className="text-rose-400 font-bold">⚠️ Critical Gap: This entity is under-referenced and barely linked. Create more lore documents or scripts containing "{selectedHeatmapItem.name}" to balance the project.</span>
-                                                        ) : selectedHeatmapItem.status === 'overlap' ? (
-                                                            <span className="text-purple-400 font-bold">🔥 Highly Connected: Dense overlapping hub. This entity is central to multiple thematic files and relationships.</span>
-                                                        ) : (
-                                                            <span className="text-green-400 font-bold">✓ Perfectly Balanced: Structurally integrated with stable mentions and connections.</span>
-                                                        )}
-                                                    </p>
-                                                </div>
-                                            </div>
-                                        )}
-                                    </div>
-                                );
-                            })()}
-                        </div>
+                        {/* 2D DENSITY HEATMAP: LORE TOPICS ACROSS PROJECT */}
+                        <LoreDensityHeatmap2D
+                            projectLore={projectLore}
+                            projectCharacters={projectCharacters}
+                            tripletEdges={tripletEdges}
+                            vectors={vectors}
+                        />
                         
                         <div className="bg-neutral-900/80 border border-neutral-800 rounded-2xl p-8 backdrop-blur-md">
                             <h2 className="text-sm font-black text-white uppercase tracking-widest mb-6 border-b border-neutral-800 pb-4">Factory Pipeline</h2>
@@ -2050,6 +1898,36 @@ export const KnowledgeView: React.FC<KnowledgeViewProps> = ({
                                 <TrashIcon className="w-4 h-4" /> Purge Agent Memory
                             </button>
                         </div>
+                    </div>
+                )}
+
+                {activeTab === 'heatmap' && (
+                    <div className="max-w-6xl mx-auto space-y-6">
+                        <div className="bg-neutral-900/80 border border-neutral-800 p-6 rounded-2xl backdrop-blur-md shadow-xl flex flex-wrap items-center justify-between gap-4">
+                            <div>
+                                <h2 className="text-lg font-black text-white flex items-center gap-2.5">
+                                    <span>🔥</span>
+                                    <span>2D Density Heatmap (Narrative Topic Distribution)</span>
+                                </h2>
+                                <p className="text-xs text-neutral-400 mt-1">
+                                    Visualizes topic frequency, cross-domain saturation, and thematic concentrations across all five project sectors.
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setActiveTab('overview')}
+                                className="px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 hover:text-white rounded-xl text-xs font-bold transition-all border border-neutral-700"
+                            >
+                                ← Back to Factory
+                            </button>
+                        </div>
+
+                        <LoreDensityHeatmap2D
+                            projectLore={projectLore}
+                            projectCharacters={projectCharacters}
+                            tripletEdges={tripletEdges}
+                            vectors={vectors}
+                        />
                     </div>
                 )}
                 

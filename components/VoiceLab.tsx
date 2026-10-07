@@ -1,14 +1,22 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Client } from "@gradio/client";
-import { Agent } from '../types';
+import { Agent, VoiceCommandLogEntry, ActiveView } from '../types';
 import { getHfApiKey } from '../services/apiKeyService';
 import { EXTERNAL_MODEL_ENDPOINTS } from '../services/externalRouter';
 import { SpeakerIcon, UploadIcon, WarningIcon, LoadingSpinner, UserIcon } from './icons';
+import { VoiceCommandLogPanel } from './VoiceCommandLogPanel';
 
 interface VoiceLabProps {
     agents: Agent[];
     onAudioGenerated?: (audioUrl: string) => void;
+    voiceCommands?: VoiceCommandLogEntry[];
+    voiceAssistantActive?: boolean;
+    onToggleVoiceAssistant?: () => void;
+    onNavigate?: (view: ActiveView) => void;
+    onSimulateCommand?: (transcript: string) => void;
+    onClearLogs?: () => void;
+    initialTab?: 'synth' | 'logs';
 }
 
 // Helper to convert data URL to Blob for Gradio Client
@@ -17,7 +25,18 @@ const dataUrlToBlob = async (dataUrl: string): Promise<Blob> => {
     return await res.blob();
 };
 
-export const VoiceLab: React.FC<VoiceLabProps> = ({ agents, onAudioGenerated }) => {
+export const VoiceLab: React.FC<VoiceLabProps> = ({ 
+    agents, 
+    onAudioGenerated,
+    voiceCommands = [],
+    voiceAssistantActive = false,
+    onToggleVoiceAssistant,
+    onNavigate,
+    onSimulateCommand,
+    onClearLogs,
+    initialTab = 'synth'
+}) => {
+    const [activeSubTab, setActiveSubTab] = useState<'synth' | 'logs'>(initialTab);
     const [selectedAgentId, setSelectedAgentId] = useState<string>(agents[0]?.id || '');
     const [text, setText] = useState('');
     
@@ -157,12 +176,53 @@ export const VoiceLab: React.FC<VoiceLabProps> = ({ agents, onAudioGenerated }) 
 
     return (
         <div className="p-6 max-w-4xl mx-auto w-full h-full flex flex-col space-y-6 overflow-y-auto custom-scrollbar">
-            <div className="flex-shrink-0">
-                <h2 className="text-3xl font-bold text-neutral-200 mb-2">Voice Lab</h2>
-                <p className="text-neutral-400">Grounded voice synthesis for generating agent dialogue.</p>
+            <div className="flex-shrink-0 flex flex-wrap items-center justify-between gap-4">
+                <div>
+                    <h2 className="text-3xl font-bold text-neutral-200 mb-1">Voice Lab</h2>
+                    <p className="text-neutral-400 text-sm">Grounded voice synthesis for generating agent dialogue & voice command routing.</p>
+                </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            {/* Sub-Tab Navigation Bar */}
+            <div className="flex border-b border-neutral-800 shrink-0">
+                <button
+                    onClick={() => setActiveSubTab('synth')}
+                    className={`px-5 py-3 border-b-2 text-xs uppercase tracking-widest font-black transition-all flex items-center gap-2 cursor-pointer ${
+                        activeSubTab === 'synth'
+                            ? 'border-blue-500 text-blue-400'
+                            : 'border-transparent text-neutral-400 hover:text-neutral-200'
+                    }`}
+                >
+                    <SpeakerIcon className="w-4 h-4" />
+                    <span>Voice Synthesis Studio</span>
+                </button>
+                <button
+                    onClick={() => setActiveSubTab('logs')}
+                    className={`px-5 py-3 border-b-2 text-xs uppercase tracking-widest font-black transition-all flex items-center gap-2 cursor-pointer ${
+                        activeSubTab === 'logs'
+                            ? 'border-indigo-500 text-indigo-400 shadow-[0_0_12px_rgba(99,102,241,0.25)]'
+                            : 'border-transparent text-neutral-400 hover:text-neutral-200'
+                    }`}
+                >
+                    <span>📋 Voice Command Log</span>
+                    <span className="px-1.5 py-0.5 rounded-full text-[9px] font-mono bg-indigo-950 text-indigo-300 border border-indigo-800">
+                        {voiceCommands.length}
+                    </span>
+                </button>
+            </div>
+
+            {activeSubTab === 'logs' ? (
+                <VoiceCommandLogPanel
+                    voiceCommands={voiceCommands}
+                    voiceAssistantActive={voiceAssistantActive}
+                    onToggleVoiceAssistant={onToggleVoiceAssistant}
+                    onNavigate={onNavigate}
+                    onSimulateCommand={onSimulateCommand}
+                    onClearLogs={onClearLogs}
+                    embedded={true}
+                />
+            ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 {/* Left Column: Controls */}
                 <div className="space-y-6 bg-neutral-800/50 p-6 border border-neutral-700 rounded-xl h-fit">
                     <div>
@@ -265,6 +325,7 @@ export const VoiceLab: React.FC<VoiceLabProps> = ({ agents, onAudioGenerated }) 
                     )}
                 </div>
             </div>
+            )}
         </div>
     );
 };

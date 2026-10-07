@@ -69,6 +69,7 @@ const DEFAULT_MENU_ITEMS: MenuItem[] = [
     { id: 'transcription-studio', type: 'link', label: 'Transcription Studio', view: 'transcription-studio', icon: SpeakerIcon },
     { id: 'live-studio', type: 'link', label: 'Live Conversation', view: 'live-studio', icon: AudioSparkIcon },
     { id: 'voice-lab', type: 'link', label: 'Voice Lab', view: 'voice-lab', icon: SpeakerIcon },
+    { id: 'voice-command-log', type: 'link', label: 'Voice Command Log', view: 'voice-command-log', icon: SpeakerIcon },
     { id: 'dubbing-studio', type: 'link', label: 'Dubbing Studio', view: 'dubbing-studio', icon: SpeakerIcon },
     { id: 'composer-studio', type: 'link', label: 'Composer Studio', view: 'composer-studio', icon: AudioSparkIcon },
 

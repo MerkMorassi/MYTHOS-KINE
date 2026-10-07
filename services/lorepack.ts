@@ -2,11 +2,113 @@
 
 import { vectorDb, VectorRecord } from './vectorDbService';
 import { GraphNode, GraphEdge, TripletEdge } from '../types.ts';
-import { getEmbeddings, extractTripletsFromText } from './geminiService';
+import { 
+    getEmbeddings, 
+    extractTripletsFromText, 
+    calculateDynamicWaitMs, 
+    isQuotaOrRateLimitError, 
+    geminiCircuitBreaker, 
+    CircuitBreakerOpenError 
+} from './geminiService';
 
 const LAST_SYNC_KEY = 'mythos_lorepack_last_sync';
 
+export interface LorepackRetryOptions {
+    maxRetries?: number;
+    initialDelayMs?: number;
+    maxDelayMs?: number;
+    backoffFactor?: number;
+    taskName?: string;
+    onRetry?: (attempt: number, delayMs: number, error: any, reason: string) => void;
+}
+
 class FactoryService {
+    private isSyncing = false;
+
+    // --- DYNAMIC RETRY & WAIT TIMER ENGINE ---
+
+    /**
+     * Calculates the dynamic wait delay based on the specific error code received:
+     * - 429 / Rate Limit: Exponential backoff with jitter to allow token bucket to replenish
+     * - 500 / 502: Immediate / minimal retry (150-300ms) for transient socket glitches
+     * - 503 / 504 / Overload: Moderate backoff
+     * - Network glitches: Quick retry
+     */
+    calculateRetryDelay(error: any, attempt: number, options?: { initialDelayMs?: number; maxDelayMs?: number; backoffFactor?: number }) {
+        return calculateDynamicWaitMs(error, attempt, options);
+    }
+
+    /**
+     * Executes an operation with error-code-specific dynamic wait timer and circuit-breaker awareness.
+     */
+    async executeWithDynamicRetry<T>(
+        taskName: string,
+        operation: () => Promise<T>,
+        opts: LorepackRetryOptions = {}
+    ): Promise<T> {
+        const maxRetries = opts.maxRetries ?? 4;
+        let lastError: any = null;
+
+        for (let attempt = 0; attempt < maxRetries; attempt++) {
+            // Check circuit breaker state if applicable
+            const circuit = geminiCircuitBreaker.canExecute();
+            if (!circuit.allowed) {
+                const waitSec = Math.ceil(circuit.timeRemainingMs / 1000);
+                throw new CircuitBreakerOpenError(
+                    `[${taskName}] Paused by Gemini Circuit Breaker. System is recovering (${waitSec}s remaining).`,
+                    circuit.timeRemainingMs
+                );
+            }
+
+            try {
+                const result = await operation();
+                return result;
+            } catch (error: any) {
+                lastError = error;
+                const errMsg = error?.message || String(error);
+
+                // Fast-fail on non-retryable errors
+                const isRateLimit = isQuotaOrRateLimitError(error);
+                if (
+                    !isRateLimit &&
+                    (
+                        errMsg.includes("API Key is missing") ||
+                        errMsg.includes("API_KEY_INVALID") ||
+                        error.status === 401 ||
+                        error.status === 403 ||
+                        error.status === 400
+                    )
+                ) {
+                    console.error(`[${taskName}] Non-retryable error:`, errMsg);
+                    throw error;
+                }
+
+                if (attempt === maxRetries - 1) {
+                    console.error(`[${taskName}] All ${maxRetries} retry attempts exhausted. Final error:`, errMsg);
+                    throw error;
+                }
+
+                // Dynamic wait timer calculated from error code
+                const waitInfo = this.calculateRetryDelay(error, attempt, {
+                    initialDelayMs: opts.initialDelayMs,
+                    maxDelayMs: opts.maxDelayMs,
+                    backoffFactor: opts.backoffFactor
+                });
+
+                console.warn(
+                    `[${taskName}] Attempt ${attempt + 1}/${maxRetries} failed. ${waitInfo.description}. [${errMsg.slice(0, 100)}]`
+                );
+
+                if (opts.onRetry) {
+                    opts.onRetry(attempt + 1, waitInfo.delayMs, error, waitInfo.reason);
+                }
+
+                await new Promise(r => setTimeout(r, waitInfo.delayMs));
+            }
+        }
+
+        throw lastError || new Error(`[${taskName}] Failed after ${maxRetries} retries.`);
+    }
 
     // --- UTILITIES ---
     
@@ -69,19 +171,23 @@ class FactoryService {
         const runOne = async (chunkGroup: { text: string, source: string, metadata?: any }[]) => {
             if (signal?.aborted) throw new Error('Aborted');
             
-            // Sequential / paced embedding generation to strictly avoid burst rate-limit spikes
+            // Sequential / paced embedding generation with error-specific dynamic retry
             const vectors: (number[] | null)[] = [];
             for (const chunk of chunkGroup) {
                 if (signal?.aborted) throw new Error('Aborted');
                 try {
-                    const vec = await getEmbeddings(chunk.text);
+                    const vec = await this.executeWithDynamicRetry(
+                        `Ingest Embedding (${chunk.source.slice(0, 25)})`,
+                        () => getEmbeddings(chunk.text),
+                        { maxRetries: 4 }
+                    );
                     vectors.push(vec);
                 } catch (embErr) {
-                    console.warn(`[Lorepack Ingest] Embedding failed for chunk in "${chunk.source}", continuing:`, embErr);
+                    console.warn(`[Lorepack Ingest] Embedding failed after dynamic retries for chunk in "${chunk.source}", continuing:`, embErr);
                     vectors.push(null);
                 }
-                // Small 120ms throttle between sequential embeddings in the same group
-                await new Promise(r => setTimeout(r, 120));
+                // Paced throttle between sequential embeddings in the same group to maintain token bucket
+                await new Promise(r => setTimeout(r, 150));
             }
 
             const nowISO = new Date().toISOString();
@@ -127,7 +233,11 @@ class FactoryService {
         if (combinedText.length < 50) return; // Don't store trivial turns
     
         try {
-            const vector = await getEmbeddings(combinedText);
+            const vector = await this.executeWithDynamicRetry(
+                `Conversational Turn Embedding (${agentHandle})`,
+                () => getEmbeddings(combinedText),
+                { maxRetries: 3 }
+            );
             if (!vector) return;
     
             const record: VectorRecord = {
@@ -143,7 +253,7 @@ class FactoryService {
             await vectorDb.addVectors([record]);
             console.log(`[LOREPACK] Ingested conversational turn for ${agentHandle}.`);
         } catch (e) {
-            console.error(`[LOREPACK] Failed to ingest conversational turn:`, e);
+            console.error(`[LOREPACK] Failed to ingest conversational turn after dynamic retries:`, e);
         }
     }
 
@@ -151,17 +261,19 @@ class FactoryService {
     async buildGraphLite(agentId: string, onProgress: (current: number, total: number, created: number) => void) {
         const nodes = await vectorDb.getVectorsByAgent(agentId);
         let created = 0;
-        const BATCH_SIZE = 5;
+        // Paced concurrency: batch size 3 to respect free and standard tier rate limits
+        const BATCH_SIZE = 3;
         let idx = 0;
 
         while (idx < nodes.length) {
-          if (idx + BATCH_SIZE > nodes.length) {
-            await new Promise(r => setTimeout(r, 200));
-          }
           const batch = nodes.slice(idx, idx + BATCH_SIZE);
           const promises = batch.map(async (node) => {
             try {
-              const triplets = await extractTripletsFromText(node.text);
+              const triplets = await this.executeWithDynamicRetry(
+                  `Triplet Extraction (${node.id?.slice(0, 8)})`,
+                  () => extractTripletsFromText(node.text),
+                  { maxRetries: 4 }
+              );
               if (Array.isArray(triplets) && triplets.length > 0) {
                 const edges: TripletEdge[] = triplets.map(t => ({
                   id: crypto.randomUUID(),
@@ -176,7 +288,9 @@ class FactoryService {
                 await vectorDb.addTripletEdges(edges);
                 return edges.length;
               }
-            } catch (e) { console.error("Triplet extraction failed for a node:", e) }
+            } catch (e) { 
+                console.error("Triplet extraction failed after dynamic retries for a node:", e); 
+            }
             return 0;
           });
     
@@ -184,6 +298,11 @@ class FactoryService {
           created += results.reduce((a, b) => a + b, 0);
           idx += BATCH_SIZE;
           if (onProgress) onProgress(Math.min(idx, nodes.length), nodes.length, created);
+
+          // Pacing delay between batches to prevent quota bursts
+          if (idx < nodes.length) {
+            await new Promise(r => setTimeout(r, 400));
+          }
         }
         return created;
     }
@@ -344,6 +463,12 @@ class FactoryService {
 
     // --- SERVER SYNC ---
     async syncLorepackToServer() {
+        if (this.isSyncing) {
+            console.log('[LOREPACK SYNC] Background sync already active in another task, skipping duplicate cycle.');
+            return;
+        }
+
+        this.isSyncing = true;
         console.log('[LOREPACK SYNC] Starting periodic sync to server...');
         const lastSyncTimestamp = parseInt(localStorage.getItem(LAST_SYNC_KEY) || '0', 10);
         const now = Date.now();
@@ -368,29 +493,40 @@ class FactoryService {
                 ...newEdges.map(e => ({ ...e, type: 'edge' }))
             ];
             
-            // FIX: Implement batching to prevent '413 Request Entity Too Large' errors.
-            const SYNC_BATCH_SIZE = 500; // Send 500 items at a time.
+            // Batching to prevent '413 Request Entity Too Large' errors
+            const SYNC_BATCH_SIZE = 500;
             let totalSynced = 0;
 
             for (let i = 0; i < nodesToSync.length; i += SYNC_BATCH_SIZE) {
                 const batch = nodesToSync.slice(i, i + SYNC_BATCH_SIZE);
-                console.log(`[LOREPACK SYNC] Sending batch ${i / SYNC_BATCH_SIZE + 1} with ${batch.length} items...`);
+                const batchIndex = Math.floor(i / SYNC_BATCH_SIZE) + 1;
+                console.log(`[LOREPACK SYNC] Sending batch ${batchIndex} with ${batch.length} items...`);
                 
-                const response = await fetch('/api/sync', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ nodes: batch })
-                });
+                // Wrap server sync in dynamic retry with error code discrimination:
+                // 500 -> immediate retry; 429 -> exponential backoff
+                const result = await this.executeWithDynamicRetry(
+                    `Server Sync Batch ${batchIndex}`,
+                    async () => {
+                        const response = await fetch('/api/sync', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ nodes: batch })
+                        });
 
-                if (!response.ok) {
-                    const errorText = await response.text();
-                    // Stop the sync process. Timestamp won't be updated, so it will retry later.
-                    throw new Error(`Server sync failed on batch with status ${response.status}: ${errorText}`);
-                }
+                        if (!response.ok) {
+                            const errorText = await response.text();
+                            const err: any = new Error(`Server sync failed on batch with status ${response.status}: ${errorText}`);
+                            err.status = response.status;
+                            throw err;
+                        }
 
-                const result = await response.json();
+                        return await response.json();
+                    },
+                    { maxRetries: 4 }
+                );
+
                 totalSynced += batch.length;
-                console.log(`[LOREPACK SYNC] Batch successful. Server vault size: ${result.vaultSize}`);
+                console.log(`[LOREPACK SYNC] Batch successful. Server vault size: ${result?.vaultSize}`);
             }
             
             console.log(`[LOREPACK SYNC] Successfully synced a total of ${totalSynced} items in batches.`);
@@ -400,7 +536,9 @@ class FactoryService {
 
         } catch (error) {
             console.error('[LOREPACK SYNC] Error syncing with server:', error);
-            // Do not update the timestamp on error, allowing a retry of the failed data on the next cycle.
+            // Do not update timestamp on error, allowing retry of failed data on next cycle
+        } finally {
+            this.isSyncing = false;
         }
     }
 }

@@ -3,11 +3,14 @@ import React, { useState, useEffect } from 'react';
 import { LoreEntry, ThematicTaxonomyItem } from '../types.ts';
 import { LoreIcon, FolderIcon } from './icons.tsx';
 import { LoreNetwork } from './LoreNetwork.tsx';
-import { batchCategorizeWithGemini } from '../services/geminiService.ts';
+import { batchCategorizeWithGemini, geminiCircuitBreaker, resetGeminiCircuitBreaker, CircuitBreakerStatus } from '../services/geminiService.ts';
 import { EntityTimeline } from './EntityTimeline.tsx';
 import { LoreBatchAuditTool } from './LoreBatchAuditTool.tsx';
 import { NarrativeDriftDiffTool } from './NarrativeDriftDiffTool.tsx';
 import { ThematicNavigator } from './ThematicNavigator.tsx';
+import { Lore3DUniverseGraph } from './Lore3DUniverseGraph.tsx';
+import { KnowledgeInsightsPanel } from './KnowledgeInsightsPanel.tsx';
+import { CharacterArcTimeline } from './CharacterArcTimeline.tsx';
 
 interface ProjectSummary {
     id: string;
@@ -348,7 +351,7 @@ export const LoreStudio: React.FC<LoreStudioProps> = ({
     onUpdateCharacters, 
     onUpdateLore 
 }) => {
-    const [activeTab, setActiveTab] = useState<'bible' | 'network' | 'clustering' | 'heatmap' | 'timeline' | 'audit' | 'diff' | 'navigator'>('bible');
+    const [activeTab, setActiveTab] = useState<'bible' | 'network' | 'cosmos' | 'clustering' | 'heatmap' | 'timeline' | 'arc-timeline' | 'audit' | 'diff' | 'navigator' | 'insights'>('bible');
     const [selectedTheme, setSelectedTheme] = useState<ThematicTaxonomyItem | null>(null);
     const [newTitle, setNewTitle] = useState('');
     const [newContent, setNewContent] = useState('');
@@ -361,6 +364,28 @@ export const LoreStudio: React.FC<LoreStudioProps> = ({
     const [activeHeatmapFilter, setActiveHeatmapFilter] = useState<'all' | 'gaps' | 'overlaps'>('all');
     const [entityTypeFilter, setEntityTypeFilter] = useState<'all' | 'characters' | 'locations' | 'themes'>('all');
     const [selectedHeatmapItem, setSelectedHeatmapItem] = useState<any | null>(null);
+
+    // Circuit Breaker State Listener for Gemini API
+    const [circuitStatus, setCircuitStatus] = useState<CircuitBreakerStatus>(() => geminiCircuitBreaker.getStatus());
+
+    useEffect(() => {
+        const unsubscribe = geminiCircuitBreaker.subscribe((status) => {
+            setCircuitStatus(status);
+        });
+
+        // Periodic timer to tick countdown while circuit breaker is open
+        const interval = setInterval(() => {
+            const current = geminiCircuitBreaker.getStatus();
+            if (current.state === 'OPEN') {
+                setCircuitStatus(current);
+            }
+        }, 1000);
+
+        return () => {
+            unsubscribe();
+            clearInterval(interval);
+        };
+    }, []);
 
     useEffect(() => {
         if (!activeProjectId) return;
@@ -466,6 +491,34 @@ export const LoreStudio: React.FC<LoreStudioProps> = ({
                     </button>
                 </div>
 
+                {/* Circuit Breaker Status Banner */}
+                {circuitStatus.state === 'OPEN' && (
+                    <div className="mb-6 bg-gradient-to-r from-amber-950/70 via-red-950/50 to-neutral-900 border border-amber-500/50 rounded-2xl p-4 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 animate-fade-in shadow-2xl">
+                        <div className="flex items-start md:items-center gap-3.5">
+                            <span className="w-3.5 h-3.5 rounded-full bg-amber-500 animate-ping shrink-0 mt-1 md:mt-0" />
+                            <div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <span className="text-xs font-black text-amber-400 uppercase tracking-widest font-mono">
+                                        ⚡ Gemini Circuit Breaker Active ({circuitStatus.consecutiveFailures} consecutive errors)
+                                    </span>
+                                    <span className="text-[10px] bg-amber-900/60 text-amber-200 border border-amber-600/40 px-2 py-0.5 rounded-full font-mono font-bold">
+                                        Auto-Recovery in {Math.ceil(circuitStatus.timeRemainingMs / 1000)}s
+                                    </span>
+                                </div>
+                                <p className="text-xs text-neutral-300 mt-1 leading-relaxed">
+                                    Outbound Gemini calls are temporarily disabled for 30 seconds to allow upstream quota and rate limits to reset. Background synchronization will automatically resume once the window clears.
+                                </p>
+                            </div>
+                        </div>
+                        <button
+                            onClick={() => resetGeminiCircuitBreaker()}
+                            className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-black font-black uppercase text-xs tracking-wider rounded-xl transition-all shadow-md shrink-0 cursor-pointer"
+                        >
+                            Reset Circuit Breaker Now
+                        </button>
+                    </div>
+                )}
+
                 {/* Tab Switcher */}
                 <div className="flex border-b border-neutral-800">
                     <button
@@ -487,6 +540,17 @@ export const LoreStudio: React.FC<LoreStudioProps> = ({
                         }`}
                     >
                         🔮 Lore Network Constellation
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('cosmos')}
+                        className={`px-5 py-3 border-b-2 text-xs uppercase tracking-widest font-black transition-all flex items-center gap-1.5 ${
+                            activeTab === 'cosmos' 
+                                ? 'border-cyan-400 text-cyan-300 shadow-[0_0_12px_rgba(6,182,212,0.3)]' 
+                                : 'border-transparent text-neutral-400 hover:text-neutral-200'
+                        }`}
+                        title="3D Force-Directed Interconnected Graph of Characters, Lore, and Scripts"
+                    >
+                        🪐 3D Universe Cosmos
                     </button>
                     <button
                         onClick={() => setActiveTab('clustering')}
@@ -519,6 +583,17 @@ export const LoreStudio: React.FC<LoreStudioProps> = ({
                         ⏳ Entity Timeline
                     </button>
                     <button
+                        onClick={() => setActiveTab('arc-timeline')}
+                        className={`px-5 py-3 border-b-2 text-xs uppercase tracking-widest font-black transition-all flex items-center gap-1.5 ${
+                            activeTab === 'arc-timeline' 
+                                ? 'border-purple-400 text-purple-300 shadow-[0_0_12px_rgba(168,85,247,0.35)]' 
+                                : 'border-transparent text-neutral-400 hover:text-neutral-200'
+                        }`}
+                        title="Character Arc Timeline Across All Scripts in the Project"
+                    >
+                        🎭 Character Arc Timeline
+                    </button>
+                    <button
                         onClick={() => setActiveTab('audit')}
                         className={`px-5 py-3 border-b-2 text-xs uppercase tracking-widest font-black transition-all flex items-center gap-1.5 ${
                             activeTab === 'audit' 
@@ -548,10 +623,34 @@ export const LoreStudio: React.FC<LoreStudioProps> = ({
                     >
                         🧭 Thematic Navigator
                     </button>
+                    <button
+                        onClick={() => setActiveTab('insights')}
+                        className={`px-5 py-3 border-b-2 text-xs uppercase tracking-widest font-black transition-all flex items-center gap-1.5 ${
+                            activeTab === 'insights' 
+                                ? 'border-amber-400 text-amber-300 shadow-[0_0_12px_rgba(251,191,36,0.3)]' 
+                                : 'border-transparent text-neutral-400 hover:text-neutral-200'
+                        }`}
+                        title="Knowledge Insights & Thematic Contradiction Resolutions"
+                    >
+                        💡 Knowledge Insights
+                    </button>
                 </div>
             </div>
 
-            {activeTab === 'navigator' ? (
+            {activeTab === 'insights' ? (
+                <KnowledgeInsightsPanel
+                    lore={lore}
+                    characters={characters}
+                    scriptsBin={scriptsBin}
+                    activeProjectId={activeProjectId}
+                    projectName={projects.find(p => p.id === activeProjectId)?.name || 'ZOE FILMS Universe'}
+                    onCreateLore={(t, c) => onCreate(t, c, activeProjectId || '')}
+                    onSelectLore={(loreId) => {
+                        setActiveTab('bible');
+                        setEditingId(loreId);
+                    }}
+                />
+            ) : activeTab === 'navigator' ? (
                 <ThematicNavigator
                     lore={lore}
                     characters={characters}
@@ -585,11 +684,31 @@ export const LoreStudio: React.FC<LoreStudioProps> = ({
                     transcripts={transcripts}
                     onAddMilestoneToLore={(t, c) => onCreate(t, c, activeProjectId)}
                 />
+            ) : activeTab === 'arc-timeline' ? (
+                <CharacterArcTimeline
+                    characters={characters}
+                    scriptsBin={scriptsBin}
+                    lore={lore}
+                    projectName={projects.find(p => p.id === activeProjectId)?.name || 'ZOE FILMS Universe'}
+                    activeProjectId={activeProjectId}
+                />
+            ) : activeTab === 'cosmos' ? (
+                <Lore3DUniverseGraph
+                    lore={lore}
+                    characters={characters}
+                    scriptsBin={scriptsBin}
+                    activeProjectId={activeProjectId}
+                    onSelectLore={(loreId) => {
+                        setActiveTab('bible');
+                        setEditingId(loreId);
+                    }}
+                />
             ) : activeTab === 'network' ? (
                 <LoreNetwork 
                     lore={lore} 
                     characters={characters} 
                     activeProjectId={activeProjectId} 
+                    onSwitchTo3D={() => setActiveTab('cosmos')}
                 />
             ) : activeTab === 'clustering' ? (
                 <LoreClusteringUtility
