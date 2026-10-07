@@ -129,6 +129,8 @@ export const Lore3DUniverseGraph: React.FC<Lore3DUniverseGraphProps> = ({
     const [searchQuery, setSearchQuery] = useState<string>('');
     const [autoRotate, setAutoRotate] = useState<boolean>(true);
     const [isolateSelection, setIsolateSelection] = useState<boolean>(false);
+    const [isAnalyzingGemini, setIsAnalyzingGemini] = useState<boolean>(false);
+    const [geminiReport, setGeminiReport] = useState<Lore3DGraphWeightsReport | null>(null);
 
     // Selected & Hovered Nodes and Influence Lines
     const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
@@ -395,11 +397,65 @@ export const Lore3DUniverseGraph: React.FC<Lore3DUniverseGraphProps> = ({
             }
         }
 
+        // 5. Overwrite/Inject Gemini connection weights if available
+        if (geminiReport && geminiReport.connections) {
+            geminiReport.connections.forEach(gLink => {
+                // Find if a link already exists between these two entities
+                const existing = links.find(l => 
+                    (l.source === gLink.sourceId && l.target === gLink.targetId) ||
+                    (l.source === gLink.targetId && l.target === gLink.sourceId)
+                );
+
+                if (existing) {
+                    existing.strength = gLink.weight;
+                    existing.reason = gLink.reason || existing.reason;
+                    existing.isGeminiWeight = true;
+                    existing.thematicKeywordOverlap = gLink.thematicKeywordOverlap;
+                    existing.characterCoOccurrences = gLink.characterCoOccurrences;
+                    existing.narrativeSignificance = gLink.narrativeSignificance;
+                } else {
+                    // Create new thematic link from Gemini if it doesn't exist
+                    links.push({
+                        id: `gemini_link_${gLink.sourceId}_${gLink.targetId}`,
+                        source: gLink.sourceId,
+                        target: gLink.targetId,
+                        reason: gLink.reason,
+                        strength: gLink.weight,
+                        isInfluenceLine: true, // Render as influence line for visibility
+                        isGeminiWeight: true,
+                        thematicKeywordOverlap: gLink.thematicKeywordOverlap,
+                        characterCoOccurrences: gLink.characterCoOccurrences,
+                        narrativeSignificance: gLink.narrativeSignificance
+                    });
+                }
+            });
+        }
+
         // Validate links
         const validLinks = links.filter(l => existingNodeIds.has(l.source) && existingNodeIds.has(l.target));
 
         return { nodes, links: validLinks };
-    }, [lore, characters, scriptsBin]);
+    }, [lore, characters, scriptsBin, geminiReport]);
+
+    const handleSyncGeminiWeights = async () => {
+        if (isAnalyzingGemini) return;
+        setIsAnalyzingGemini(true);
+        try {
+            const report = await calculateLore3DConnectionWeightsWithGemini({
+                lore,
+                characters,
+                scriptsBin
+            });
+            setGeminiReport(report);
+            setIsolateSelection(false);
+            alert(`✨ Gemini narrative analysis complete! Synchronized ${report.totalConnectionsAnalyzed} high-fidelity connection weights based on character co-occurrences and thematic keyword overlap.`);
+        } catch (err) {
+            console.error("Gemini weight sync failed:", err);
+            alert("Failed to sync narrative weights with Gemini. Please check your API key.");
+        } finally {
+            setIsAnalyzingGemini(false);
+        }
+    };
 
     // Keep node and link refs in sync
     useEffect(() => {
@@ -1255,6 +1311,32 @@ export const Lore3DUniverseGraph: React.FC<Lore3DUniverseGraphProps> = ({
                         title="Save High-Resolution PNG of Current 3D Graph"
                     >
                         <span>📸 Snapshot</span>
+                    </button>
+
+                    <div className="w-px h-4 bg-neutral-700 mx-1" />
+
+                    {/* Gemini Sync Button */}
+                    <button
+                        onClick={handleSyncGeminiWeights}
+                        disabled={isAnalyzingGemini}
+                        className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all shadow-md cursor-pointer flex items-center gap-2 border ${
+                            isAnalyzingGemini
+                                ? 'bg-neutral-800 text-neutral-500 border-neutral-700'
+                                : 'bg-gradient-to-r from-indigo-600 via-purple-600 to-rose-600 text-white border-white/20 hover:scale-[1.02] active:scale-95'
+                        }`}
+                        title="Calculate Connection Weights using Gemini API based on Character Co-occurrences and Thematic Overlap"
+                    >
+                        {isAnalyzingGemini ? (
+                            <>
+                                <div className="w-3 h-3 border-2 border-neutral-500 border-t-transparent rounded-full animate-spin" />
+                                <span>Analyzing Narrative...</span>
+                            </>
+                        ) : (
+                            <>
+                                <span>✨</span>
+                                <span>Sync Gemini Weights</span>
+                            </>
+                        )}
                     </button>
                 </div>
             </div>

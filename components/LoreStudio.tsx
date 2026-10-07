@@ -9,6 +9,7 @@ import { LoreBatchAuditTool } from './LoreBatchAuditTool.tsx';
 import { NarrativeDriftDiffTool } from './NarrativeDriftDiffTool.tsx';
 import { ThematicNavigator } from './ThematicNavigator.tsx';
 import { Lore3DUniverseGraph } from './Lore3DUniverseGraph.tsx';
+import { LoreQuerySearchBar } from './LoreQuerySearchBar.tsx';
 import { KnowledgeInsightsPanel } from './KnowledgeInsightsPanel.tsx';
 import { CharacterArcTimeline } from './CharacterArcTimeline.tsx';
 
@@ -892,7 +893,17 @@ export const LoreStudio: React.FC<LoreStudioProps> = ({
                     })()}
                 </div>
             ) : (
-                <>
+                <div className="space-y-6">
+                    <LoreQuerySearchBar 
+                        lore={lore}
+                        transcripts={transcripts}
+                        characters={characters}
+                        activeProjectId={activeProjectId}
+                        onSelectLore={(loreId) => {
+                            setEditingId(loreId);
+                        }}
+                    />
+
                     <div className="mb-8">
                         <form onSubmit={handleCreate} className="bg-neutral-800/50 p-6 border border-neutral-700 space-y-4 rounded-xl shadow-xl">
                              <h3 className="text-lg font-semibold text-neutral-300">Add New Lore Entry</h3>
@@ -1014,7 +1025,7 @@ export const LoreStudio: React.FC<LoreStudioProps> = ({
                         );
                         })()}
                     </div>
-                </>
+                </div>
             )}
         </div>
     );
