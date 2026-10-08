@@ -1,6 +1,8 @@
 
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import { ScriptIcon } from './icons.tsx';
+import { BreakdownViewModal } from './BreakdownViewModal.tsx';
+import { normalizeToFountain } from '../utils/textFormatting.ts';
 
 interface ScriptViewerProps {
     scriptText: string;
@@ -9,6 +11,7 @@ interface ScriptViewerProps {
 
 export const ScriptViewer: React.FC<ScriptViewerProps> = ({ scriptText, onUpload }) => {
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const [showBreakdown, setShowBreakdown] = useState(false);
 
     const handleUploadClick = () => {
         fileInputRef.current?.click();
@@ -36,12 +39,22 @@ export const ScriptViewer: React.FC<ScriptViewerProps> = ({ scriptText, onUpload
                     accept=".txt,.md,.fountain"
                     onChange={handleFileChange}
                 />
-                <button
-                    onClick={handleUploadClick}
-                    className="bg-neutral-700 text-white font-semibold py-2 px-4 hover:bg-neutral-600 transition duration-300 rounded"
-                >
-                    {scriptText ? 'Replace Script' : 'Upload Script'}
-                </button>
+                <div className="flex items-center gap-3">
+                    {scriptText && (
+                        <button
+                            onClick={() => setShowBreakdown(true)}
+                            className="bg-emerald-600 text-white font-semibold py-2 px-4 hover:bg-emerald-500 transition duration-300 rounded flex items-center gap-2 cursor-pointer shadow"
+                        >
+                            <ScriptIcon className="w-4 h-4" /> Production Breakdown
+                        </button>
+                    )}
+                    <button
+                        onClick={handleUploadClick}
+                        className="bg-neutral-700 text-white font-semibold py-2 px-4 hover:bg-neutral-600 transition duration-300 rounded"
+                    >
+                        {scriptText ? 'Replace Script' : 'Upload Script'}
+                    </button>
+                </div>
             </div>
             {scriptText ? (
                 <pre className="whitespace-pre-wrap break-words font-mono text-sm text-neutral-300 bg-neutral-800/70 p-6 border border-neutral-700 rounded-lg">
@@ -53,6 +66,19 @@ export const ScriptViewer: React.FC<ScriptViewerProps> = ({ scriptText, onUpload
                     <h3 className="text-xl font-semibold text-neutral-300 mb-2">No Script Loaded</h3>
                     <p className="text-neutral-500">Upload a .txt file to view your screenplay here.</p>
                 </div>
+            )}
+
+            {showBreakdown && scriptText && (
+                <BreakdownViewModal
+                    script={{
+                        id: 'current_viewer_script',
+                        title: 'Current Screenplay',
+                        content: normalizeToFountain(scriptText),
+                        date: new Date().toLocaleDateString(),
+                        type: 'screenplay'
+                    }}
+                    onClose={() => setShowBreakdown(false)}
+                />
             )}
         </div>
     );

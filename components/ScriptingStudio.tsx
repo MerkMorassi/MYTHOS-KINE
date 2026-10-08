@@ -6,6 +6,7 @@ import { StudioHeader } from './StudioHeader.tsx';
 import { ScriptIcon, ChatIcon, LibraryIcon, DownloadIcon, CloseIcon } from './icons.tsx';
 import { TrashIcon } from './icons/TrashIcon';
 import { ScriptViewer } from './ScriptViewer.tsx';
+import { BreakdownViewModal } from './BreakdownViewModal.tsx';
 
 interface ScriptingStudioProps {
     agent: Agent;
@@ -23,6 +24,7 @@ export const ScriptingStudio: React.FC<ScriptingStudioProps> = ({
 }) => {
     const [activeTab, setActiveTab] = useState<'chat' | 'viewer' | 'bin'>(defaultTab);
     const [selectedScript, setSelectedScript] = useState<ScriptFile | null>(null);
+    const [breakdownScript, setBreakdownScript] = useState<ScriptFile | null>(null);
 
     const handleDownload = (s: ScriptFile) => {
         const blob = new Blob([s.content], { type: 'text/plain' });
@@ -101,12 +103,20 @@ export const ScriptingStudio: React.FC<ScriptingStudioProps> = ({
                                     <div className="bg-black/40 rounded-lg p-3 text-[10px] font-mono text-neutral-400 flex-grow overflow-hidden leading-tight">
                                         {s.content.substring(0, 300)}...
                                     </div>
-                                    <button 
-                                        onClick={() => setSelectedScript(s)}
-                                        className="mt-4 w-full py-2 bg-neutral-800 hover:bg-neutral-700 text-white text-xs font-bold uppercase tracking-wider rounded"
-                                    >
-                                        Inspect Draft
-                                    </button>
+                                    <div className="mt-4 grid grid-cols-2 gap-2">
+                                        <button 
+                                            onClick={() => setSelectedScript(s)}
+                                            className="py-2 bg-neutral-800 hover:bg-neutral-700 text-white text-[11px] font-bold uppercase tracking-wider rounded transition-colors text-center"
+                                        >
+                                            Inspect Draft
+                                        </button>
+                                        <button 
+                                            onClick={() => setBreakdownScript(s)}
+                                            className="py-2 bg-emerald-700/80 hover:bg-emerald-600 text-white text-[11px] font-bold uppercase tracking-wider rounded transition-colors flex items-center justify-center gap-1.5 shadow"
+                                        >
+                                            Breakdown
+                                        </button>
+                                    </div>
                                 </div>
                             ))}
                         </div>
@@ -137,6 +147,16 @@ export const ScriptingStudio: React.FC<ScriptingStudioProps> = ({
                             {selectedScript.content}
                         </div>
                         <div className="p-6 border-t border-neutral-800 flex justify-end gap-3 bg-neutral-900">
+                            <button 
+                                onClick={() => {
+                                    const s = selectedScript;
+                                    setSelectedScript(null);
+                                    setBreakdownScript(s);
+                                }} 
+                                className="px-6 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg flex items-center gap-2 cursor-pointer shadow"
+                            >
+                                <ScriptIcon className="w-4 h-4" /> Production Breakdown
+                            </button>
                             <button onClick={() => handleDownload(selectedScript)} className="px-6 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg flex items-center gap-2">
                                 <DownloadIcon className="w-4 h-4" /> Download .txt
                             </button>
@@ -144,6 +164,13 @@ export const ScriptingStudio: React.FC<ScriptingStudioProps> = ({
                         </div>
                     </div>
                 </div>
+            )}
+
+            {breakdownScript && (
+                <BreakdownViewModal
+                    script={breakdownScript}
+                    onClose={() => setBreakdownScript(null)}
+                />
             )}
         </div>
     );

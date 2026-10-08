@@ -1,6 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { StoryboardFrame as StoryboardFrameType } from '../types.ts';
 import { DownloadIcon, TrashIcon } from './icons.tsx';
+import { 
+    analyzeScriptEmotionalIntensityService, 
+    EmotionalIntensityPoint 
+} from '../services/geminiService.ts';
 
 interface StoryboardTimelineProps {
     frames: StoryboardFrameType[];
@@ -77,6 +81,50 @@ export const StoryboardTimeline: React.FC<StoryboardTimelineProps> = ({
     const [isPlaying, setIsPlaying] = useState<boolean>(false);
     const [activePlayingIndex, setActivePlayingIndex] = useState<number>(0);
     const [secondsInCurrentShot, setSecondsInCurrentShot] = useState<number>(0);
+
+    // Emotional Intensity Curve calculated by Gemini based on script segment analysis
+    const [intensityCurve, setIntensityCurve] = useState<EmotionalIntensityPoint[]>([]);
+    const [isCalculatingIntensity, setIsCalculatingIntensity] = useState<boolean>(false);
+    const [showIntensityCurve, setShowIntensityCurve] = useState<boolean>(true);
+
+    // Auto-calculate or update emotional intensity curve when frames or their script segments change
+    const frameSegmentsFingerprint = frames.map(f => `${f.id}:${f.scriptSegment || ''}:${f.sceneName || ''}`).join('|');
+
+    useEffect(() => {
+        if (frames.length === 0) {
+            setIntensityCurve([]);
+            return;
+        }
+
+        let isMounted = true;
+        const calculateCurve = async () => {
+            setIsCalculatingIntensity(true);
+            try {
+                const points = await analyzeScriptEmotionalIntensityService(
+                    frames.map(f => ({
+                        id: f.id,
+                        notes: f.notes,
+                        scriptSegment: f.scriptSegment,
+                        sceneName: f.sceneName,
+                        shotType: f.shotType
+                    }))
+                );
+                if (isMounted) {
+                    setIntensityCurve(points);
+                }
+            } catch (err) {
+                console.warn("Could not calculate emotional intensity curve:", err);
+            } finally {
+                if (isMounted) setIsCalculatingIntensity(false);
+            }
+        };
+
+        calculateCurve();
+
+        return () => {
+            isMounted = false;
+        };
+    }, [frameSegmentsFingerprint]);
 
     // Calculate pacing statistics
     const frameDurations = frames.map(f => Math.max(1, f.duration || 5));
@@ -246,6 +294,25 @@ export const StoryboardTimeline: React.FC<StoryboardTimelineProps> = ({
                                 <span>▶</span>
                                 <span>Simulate Pacing</span>
                             </>
+                        )}
+                    </button>
+
+                    {/* Emotional Intensity Curve Toggle */}
+                    <button
+                        type="button"
+                        onClick={() => setShowIntensityCurve(!showIntensityCurve)}
+                        disabled={frames.length === 0}
+                        className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                            showIntensityCurve
+                                ? 'bg-purple-900/60 border-purple-500/80 text-purple-200 shadow-md shadow-purple-950/50'
+                                : 'bg-neutral-800 border-neutral-700/60 text-neutral-400 hover:text-white'
+                        }`}
+                        title="Toggle AI-generated Dramatic Stakes & Emotional Intensity curve below timeline"
+                    >
+                        <span>📈</span>
+                        <span>Intensity Curve</span>
+                        {isCalculatingIntensity && (
+                            <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-ping inline-block ml-0.5" />
                         )}
                     </button>
 
@@ -630,6 +697,179 @@ export const StoryboardTimeline: React.FC<StoryboardTimelineProps> = ({
                     </div>
                 )}
             </div>
+
+            {/* EMOTIONAL INTENSITY CURVE PANEL BELOW THE TIMELINE */}
+            {showIntensityCurve && frames.length > 0 && (
+                <div className="flex-shrink-0 bg-neutral-900/95 border-t border-neutral-800 px-6 py-3.5 z-10 backdrop-blur-md shadow-2xl">
+                    <div className="flex items-center justify-between gap-4 mb-2">
+                        <div className="flex items-center gap-2">
+                            <span className="text-xs font-black text-purple-400 uppercase tracking-widest font-mono flex items-center gap-1.5">
+                                <span>📈</span> Emotional Intensity & Dramatic Stakes Curve
+                            </span>
+                            <span className="text-[10px] bg-purple-950/70 text-purple-300 border border-purple-800/60 px-2 py-0.5 rounded-full font-mono font-bold">
+                                Gemini Script Analysis
+                            </span>
+                            {isCalculatingIntensity && (
+                                <span className="text-[10px] text-neutral-400 font-mono animate-pulse">
+                                    Analyzing dramatic pacing...
+                                </span>
+                            )}
+                        </div>
+                        <div className="flex items-center gap-4 text-[10px] font-mono text-neutral-400">
+                            <span className="flex items-center gap-1">
+                                <span className="w-2 h-2 rounded-full bg-cyan-400 inline-block" /> Low / Calm
+                            </span>
+                            <span className="flex items-center gap-1">
+                                <span className="w-2 h-2 rounded-full bg-amber-400 inline-block" /> Rising Stakes
+                            </span>
+                            <span className="flex items-center gap-1">
+                                <span className="w-2 h-2 rounded-full bg-rose-500 inline-block" /> Climax / Crisis
+                            </span>
+                        </div>
+                    </div>
+
+                    {/* SVG Curve Canvas */}
+                    <div className="relative w-full h-24 bg-black/60 rounded-xl border border-neutral-800/80 overflow-hidden flex items-center justify-center p-2">
+                        {intensityCurve.length > 0 ? (
+                            (() => {
+                                const n = intensityCurve.length;
+                                const svgWidth = Math.max(600, n * 80);
+                                const svgHeight = 76;
+                                const paddingX = 40;
+                                const paddingY = 12;
+
+                                const getX = (idx: number) => {
+                                    if (n <= 1) return svgWidth / 2;
+                                    return paddingX + (idx / (n - 1)) * (svgWidth - paddingX * 2);
+                                };
+
+                                const getY = (intensity: number) => {
+                                    // 0 intensity -> bottom, 100 -> top
+                                    const available = svgHeight - paddingY * 2;
+                                    return svgHeight - paddingY - (intensity / 100) * available;
+                                };
+
+                                // Build path
+                                const pathD = intensityCurve.reduce((acc, pt, idx) => {
+                                    const x = getX(idx);
+                                    const y = getY(pt.intensity);
+                                    if (idx === 0) return `M ${x} ${y}`;
+                                    // Smooth bezier curve
+                                    const prevX = getX(idx - 1);
+                                    const prevY = getY(intensityCurve[idx - 1].intensity);
+                                    const cp1x = prevX + (x - prevX) / 2;
+                                    const cp1y = prevY;
+                                    const cp2x = prevX + (x - prevX) / 2;
+                                    const cp2y = y;
+                                    return `${acc} C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${x} ${y}`;
+                                }, '');
+
+                                // Build area fill under path
+                                const areaD = `${pathD} L ${getX(n - 1)} ${svgHeight} L ${getX(0)} ${svgHeight} Z`;
+
+                                return (
+                                    <div className="w-full h-full overflow-x-auto custom-scrollbar flex items-center">
+                                        <svg 
+                                            width="100%" 
+                                            height="100%" 
+                                            viewBox={`0 0 ${svgWidth} ${svgHeight}`} 
+                                            preserveAspectRatio="none"
+                                            className="overflow-visible"
+                                        >
+                                            <defs>
+                                                <linearGradient id="intensityGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+                                                    <stop offset="0%" stopColor="#ef4444" stopOpacity="0.4" />
+                                                    <stop offset="50%" stopColor="#f59e0b" stopOpacity="0.25" />
+                                                    <stop offset="100%" stopColor="#38bdf8" stopOpacity="0.05" />
+                                                </linearGradient>
+                                                <linearGradient id="lineStrokeGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                                                    {intensityCurve.map((pt, i) => (
+                                                        <stop
+                                                            key={i}
+                                                            offset={`${(i / Math.max(1, n - 1)) * 100}%`}
+                                                            stopColor={pt.colorHex || (pt.intensity > 70 ? '#ef4444' : pt.intensity > 45 ? '#f59e0b' : '#38bdf8')}
+                                                        />
+                                                    ))}
+                                                </linearGradient>
+                                            </defs>
+
+                                            {/* Horizontal Guideline Grids */}
+                                            <line x1="0" y1={getY(25)} x2={svgWidth} y2={getY(25)} stroke="#262626" strokeDasharray="3 3" strokeWidth="0.8" />
+                                            <line x1="0" y1={getY(50)} x2={svgWidth} y2={getY(50)} stroke="#262626" strokeDasharray="3 3" strokeWidth="0.8" />
+                                            <line x1="0" y1={getY(75)} x2={svgWidth} y2={getY(75)} stroke="#262626" strokeDasharray="3 3" strokeWidth="0.8" />
+
+                                            {/* Area Fill */}
+                                            <path d={areaD} fill="url(#intensityGradient)" />
+
+                                            {/* Main Curve Line */}
+                                            <path 
+                                                d={pathD} 
+                                                fill="none" 
+                                                stroke="url(#lineStrokeGradient)" 
+                                                strokeWidth="2.5" 
+                                                strokeLinecap="round" 
+                                                strokeLinejoin="round" 
+                                            />
+
+                                            {/* Data Points / Shot Nodes */}
+                                            {intensityCurve.map((pt, idx) => {
+                                                const x = getX(idx);
+                                                const y = getY(pt.intensity);
+                                                const targetFrame = frames[idx];
+                                                const isCurrent = isPlaying && activePlayingIndex === idx;
+
+                                                return (
+                                                    <g 
+                                                        key={idx} 
+                                                        className="cursor-pointer group"
+                                                        onClick={() => {
+                                                            setActivePlayingIndex(idx);
+                                                            if (targetFrame && frameRefs.current[targetFrame.id]) {
+                                                                frameRefs.current[targetFrame.id]?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+                                                            }
+                                                        }}
+                                                    >
+                                                        {/* Node circle */}
+                                                        <circle
+                                                            cx={x}
+                                                            cy={y}
+                                                            r={isCurrent ? 6 : 4}
+                                                            fill={isCurrent ? '#ffffff' : (pt.colorHex || '#38bdf8')}
+                                                            stroke="#000000"
+                                                            strokeWidth="1.5"
+                                                            className="transition-all group-hover:r-6"
+                                                        />
+
+                                                        {/* Shot label text */}
+                                                        <text
+                                                            x={x}
+                                                            y={svgHeight - 2}
+                                                            textAnchor="middle"
+                                                            fill="#737373"
+                                                            fontSize="8"
+                                                            fontFamily="monospace"
+                                                            className="group-hover:fill-white font-bold"
+                                                        >
+                                                            #{idx + 1}
+                                                        </text>
+
+                                                        {/* Hover Dramatic Stakes Tooltip */}
+                                                        <title>{`Shot #${idx + 1}: Intensity ${pt.intensity}% (${pt.dramaticStakes})`}</title>
+                                                    </g>
+                                                );
+                                            })}
+                                        </svg>
+                                    </div>
+                                );
+                            })()
+                        ) : (
+                            <div className="text-xs text-neutral-500 font-mono">
+                                Generating narrative stakes intensity curve...
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

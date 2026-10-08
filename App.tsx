@@ -7,6 +7,7 @@ import { ProjectsStudio } from './components/ProjectsStudio';
 import { AutomationStudio } from './components/AutomationStudio';
 import { DirectorStudio } from './modules/director/DirectorStudio';
 import { ScriptWriterStudio } from './components/ScriptWriterStudio';
+import { ScriptWriterStudio2 } from './components/ScriptWriterStudio2';
 import { ImageGeneratorStudio } from './components/ImageGeneratorStudio';
 import { Veo3Studio } from './components/Veo3Studio';
 import { NanoBananaStudio } from './components/NanoBananaStudio';
@@ -55,6 +56,7 @@ import { VoiceCommandLogPanel } from './components/VoiceCommandLogPanel.tsx';
 import { ImageModal } from './components/ImageModal.tsx';
 import { LiveStudio } from './components/LiveStudio.tsx';
 import { TranscriptionStudio } from './components/TranscriptionStudio.tsx';
+import { normalizeToFountain } from './utils/textFormatting';
 import { Agent, Project, ActiveView, ImageState, VoiceCommandLogEntry } from './types';
 import { getHfApiKey, getTopazApiKey, saveHfApiKey, saveTopazApiKey, getVoiceLabUrl, saveVoiceLabUrl, getDolphinUrl, saveDolphinUrl, getCinematicCoreUrl, saveCinematicCoreUrl, getCameraDollyUrl, saveCameraDollyUrl } from './services/apiKeyService';
 import { getAnimAgentsTeam } from './services/agentService';
@@ -904,7 +906,8 @@ export const App = () => {
             case 'agent-chat': return <AgentChatStudio agents={project.data.agents} onUploadLore={() => {}} onCallTool={async () => ({ textResult: '' })} onAddToStoryboard={handleAddToStoryboard} onAddToInspiration={handleAddToInspiration} onAddAssetToGrid={handleAddAssetToGrid} />;
             
             // Creation
-            case 'script-writer': return <ScriptWriterStudio onSendToScriptsBin={(s) => updateProjectData({ scriptsBin: [...project.data.scriptsBin, { ...s, id: `script_${Date.now()}`, date: new Date().toLocaleDateString() }] })} onNavigate={handleNavigate} promptTemplates={project.data.promptTemplates} dynamicPromptLists={project.data.dynamicPromptLists} characters={project.data.characters} lore={project.data.lore} />;
+            case 'script-writer': return <ScriptWriterStudio onSendToScriptsBin={(s) => updateProjectData({ scriptsBin: [...project.data.scriptsBin, { ...s, content: normalizeToFountain(s.content), id: `script_${Date.now()}`, date: new Date().toLocaleDateString() }] })} onNavigate={handleNavigate} promptTemplates={project.data.promptTemplates} dynamicPromptLists={project.data.dynamicPromptLists} characters={project.data.characters} lore={project.data.lore} />;
+            case 'script-writer-2': return <ScriptWriterStudio2 onSendToScriptsBin={(s) => updateProjectData({ scriptsBin: [...project.data.scriptsBin, { ...s, content: normalizeToFountain(s.content), id: `script_${Date.now()}`, date: new Date().toLocaleDateString() }] })} onNavigate={handleNavigate} promptTemplates={project.data.promptTemplates} dynamicPromptLists={project.data.dynamicPromptLists} characters={project.data.characters} lore={project.data.lore} />;
             case 'veo-3-studio': return <Veo3Studio hfToken={getHfApiKey() || ''} onAddToStoryboard={handleAddToStoryboard} onAddAssetToGrid={handleAddAssetToGrid} projects={[{ id: project.id, name: project.name }]} activeProjectId={project.id} />;
             case 'nano-banana-studio': return <NanoBananaStudio hfToken={getHfApiKey() || ''} promptTemplates={project.data.promptTemplates} dynamicPromptLists={project.data.dynamicPromptLists} agents={project.data.agents} onAddAssetToGrid={handleAddAssetToGrid} onAddToStoryboard={handleAddToStoryboard} onAddToInspiration={handleAddToInspiration} onCreateAgent={(d) => { const newAgent = { ...d, id: `agent_${Date.now()}` } as Agent; updateProjectData({ agents: [...project.data.agents, newAgent] }); return newAgent; }} />;
             case 'lyria-studio': return <LyriaStudio 
@@ -1057,6 +1060,7 @@ export const App = () => {
             }
             case 'director': return { breadcrumbs: [pBreadcrumb, { label: 'Director Suite' }] };
             case 'script-writer': return { breadcrumbs: [pBreadcrumb, { label: 'Script Writer' }] };
+            case 'script-writer-2': return { breadcrumbs: [pBreadcrumb, { label: 'Scriptwriter 2' }] };
             case 'veo-3-studio': return { breadcrumbs: [pBreadcrumb, { label: 'Veo 3 Studio' }] };
             case 'nano-banana-studio': return { breadcrumbs: [pBreadcrumb, { label: 'Nano Banana Studio' }] };
             case 'lyria-studio': return { breadcrumbs: [pBreadcrumb, { label: 'Lyria Studio' }] };

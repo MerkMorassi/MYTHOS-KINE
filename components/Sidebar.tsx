@@ -39,6 +39,7 @@ const DEFAULT_MENU_ITEMS: MenuItem[] = [
 
     { id: 'header-create', type: 'header', label: 'Creation' },
     { id: 'script-writer', type: 'link', label: 'Script Writer', view: 'script-writer', icon: EditIcon },
+    { id: 'script-writer-2', type: 'link', label: 'Scriptwriter 2', view: 'script-writer-2', icon: EditIcon },
     { id: 'nano-banana-studio', type: 'link', label: 'Nano Banana Studio', view: 'nano-banana-studio', icon: ImageIcon },
     { id: 'veo-3-studio', type: 'link', label: 'Veo 3 Studio', view: 'veo-3-studio', icon: ClapperboardIcon },
     { id: 'lyria-studio', type: 'link', label: 'Lyria Studio', view: 'lyria-studio', icon: AudioSparkIcon },

@@ -18,7 +18,7 @@ import { generateRandomConfig } from '../services/scribeRandomizer';
 import { ScriptFile, ActiveView, PromptTemplate, DynamicPromptList, NarrativeBranch } from '../types';
 import { MythosData } from '../services/mythosData';
 import { CONTENT_GUIDELINES } from '../services/contentGuidelines';
-import { simpleMarkdownToHtml } from '../utils/textFormatting';
+import { simpleMarkdownToHtml, normalizeToFountain } from '../utils/textFormatting';
 import { NarrativeBranchingWidget } from './NarrativeBranchingWidget';
 
 const cleanLiteralNewlines = (text: string): string => {
@@ -245,7 +245,7 @@ export const ScriptWriterStudio: React.FC<ScriptWriterStudioProps> = ({
         if (generatedScreenplay) {
             onSendToScriptsBin({
                 title: workingTitle || initialTitle,
-                content: generatedScreenplay,
+                content: normalizeToFountain(generatedScreenplay),
                 type: 'screenplay'
             });
             showCopyFeedback("Draft sent to Scripts Bin");
@@ -494,7 +494,7 @@ export const ScriptWriterStudio: React.FC<ScriptWriterStudioProps> = ({
                                                             onForkScript={(branch, branchScreenplay) => {
                                                                 onSendToScriptsBin({
                                                                     title: `${workingTitle || initialTitle} [Branch: ${branch.branchTitle}]`,
-                                                                    content: branchScreenplay,
+                                                                    content: normalizeToFountain(branchScreenplay),
                                                                     type: 'screenplay'
                                                                 });
                                                                 showCopyFeedback(`Branch "${branch.branchTitle}" forked to Scripts Bin`);
@@ -517,7 +517,7 @@ export const ScriptWriterStudio: React.FC<ScriptWriterStudioProps> = ({
                                                         onForkScript={(branch, branchScreenplay) => {
                                                             onSendToScriptsBin({
                                                                 title: `${workingTitle || initialTitle} [Branch: ${branch.branchTitle}]`,
-                                                                content: branchScreenplay,
+                                                                content: normalizeToFountain(branchScreenplay),
                                                                 type: 'screenplay'
                                                             });
                                                             showCopyFeedback(`Branch "${branch.branchTitle}" forked to Scripts Bin`);

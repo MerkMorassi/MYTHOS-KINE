@@ -38,3 +38,26 @@ export const simpleMarkdownToHtml = (markdown: string): string => {
         return `<p class="mb-6 leading-relaxed text-neutral-400">${trimmed.replace(/\n/g, '<br/>')}</p>`;
     }).join('');
 };
+
+/**
+ * Normalizes screenplay text to raw Fountain format at the scripts-bin / breakdown seam:
+ * - Strips any space padding from lines
+ * - Removes a trailing colon from uppercase character cue lines (length <= 38)
+ * - Preserves scene slugs, character names, parentheticals, and dialogue
+ */
+export const normalizeToFountain = (text: string): string => {
+    if (!text) return '';
+    const clean = text.replace(/\\n/g, '\n').replace(/\r\n/g, '\n');
+    return clean.split('\n').map(line => {
+        const trimmed = line.trim();
+        if (!trimmed) return '';
+        // If line is ALL-CAPS with trailing colon and <= 38 chars, strip colon (e.g. "ORIN:" -> "ORIN")
+        if (trimmed.length <= 38 && trimmed.endsWith(':')) {
+            const withoutColon = trimmed.slice(0, -1).trim();
+            if (withoutColon === withoutColon.toUpperCase() && /[A-Z]/.test(withoutColon)) {
+                return withoutColon;
+            }
+        }
+        return trimmed;
+    }).join('\n');
+};

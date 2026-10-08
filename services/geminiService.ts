@@ -3703,6 +3703,198 @@ Respond ONLY with a valid JSON object matching this schema:
     }
 };
 
+// ==========================================
+// BACKGROUND LORE INCONSISTENCY SCANNER
+// ==========================================
+
+export interface LoreInconsistencyResult {
+    hasContradiction: boolean;
+    severity?: 'low' | 'medium' | 'high';
+    contradictingEntryTitle?: string;
+    explanation?: string;
+    suggestedResolution?: string;
+}
+
+/**
+ * Compares a newly drafted or updated lore entry against existing lore entries
+ * for logical inconsistencies or narrative contradictions using Gemini API.
+ */
+export const checkLoreEntryInconsistencyService = async (
+    newTitle: string,
+    newContent: string,
+    existingEntries: { id: string; title: string; content: string }[]
+): Promise<LoreInconsistencyResult> => {
+    if (!existingEntries || existingEntries.length === 0) {
+        return { hasContradiction: false };
+    }
+
+    try {
+        return await apiCallWithRetry(async () => {
+            const ai = getClient();
+            const relevantEntriesContext = existingEntries
+                .slice(0, 25)
+                .map((e, idx) => `[Entry ${idx + 1}: "${e.title}"]\n${e.content}`)
+                .join("\n\n---\n\n");
+
+            const prompt = `You are a Hollywood script doctor and narrative continuity supervisor.
+Analyze this NEW lore entry against the existing canon lore entries of the cinematic universe.
+Determine if there are any direct logical inconsistencies, factual contradictions, timeline paradoxes, or character lore clashes.
+
+NEW ENTRY:
+Title: "${newTitle}"
+Content:
+${newContent}
+
+EXISTING CANON ENTRIES:
+${relevantEntriesContext}
+
+Task:
+If there is a real contradiction, set "hasContradiction" to true, identify which existing entry it clashes with, and explain why. If they are consistent or merely introduce new details without contradicting existing facts, set "hasContradiction" to false.
+
+Respond ONLY with valid JSON matching this schema:
+{
+  "hasContradiction": boolean,
+  "severity": "low" | "medium" | "high",
+  "contradictingEntryTitle": "title of clashing entry or none",
+  "explanation": "concise description of why this contradicts existing lore",
+  "suggestedResolution": "brief recommendation for harmonizing the lore"
+}`;
+
+            const response = await ai.models.generateContent({
+                model: 'gemini-3.8-flash',
+                contents: [{ parts: [{ text: prompt }] }],
+                config: {
+                    responseMimeType: 'application/json',
+                    temperature: 0.2
+                }
+            });
+
+            const parsed = JSON.parse(response.text || '{}');
+            return {
+                hasContradiction: Boolean(parsed.hasContradiction),
+                severity: parsed.severity || 'medium',
+                contradictingEntryTitle: parsed.contradictingEntryTitle || undefined,
+                explanation: parsed.explanation || undefined,
+                suggestedResolution: parsed.suggestedResolution || undefined
+            };
+        }, { maxRetries: 2, taskName: 'Lore Inconsistency Scanner' });
+    } catch (err) {
+        console.warn("Lore Inconsistency Scanner failed or skipped:", err);
+        return { hasContradiction: false };
+    }
+};
+
+// ==========================================
+// STORYBOARD EMOTIONAL INTENSITY CURVE SERVICE
+// ==========================================
+
+export interface EmotionalIntensityPoint {
+    shotIndex: number;
+    intensity: number; // 0 to 100
+    dramaticStakes: string; // e.g. "Rising Tension", "Climactic Confrontation", "Melancholy Lull"
+    colorHex: string;
+}
+
+/**
+ * Calculates the emotional intensity curve across storyboard frames
+ * based on script segments, dialogue, and scene context using Gemini.
+ */
+export const analyzeScriptEmotionalIntensityService = async (
+    frames: {
+        id: string;
+        notes?: string;
+        scriptSegment?: string;
+        sceneName?: string;
+        shotType?: string;
+    }[]
+): Promise<EmotionalIntensityPoint[]> => {
+    if (!frames || frames.length === 0) return [];
+
+    // Fallback baseline generator if network or key is unavailable
+    const generateFallbackIntensity = (): EmotionalIntensityPoint[] => {
+        return frames.map((f, idx) => {
+            const progress = frames.length > 1 ? idx / (frames.length - 1) : 0.5;
+            // Classic dramatic 3-act intensity curve simulation
+            let val = 30 + Math.sin(progress * Math.PI) * 55 + (idx % 2 === 0 ? 5 : -5);
+            val = Math.max(10, Math.min(95, Math.round(val)));
+            let stakes = "Exposition & Setup";
+            let color = "#38bdf8"; // cyan-400
+            if (val > 75) {
+                stakes = "Climactic Stakes / Peak Tension";
+                color = "#ef4444"; // red-500
+            } else if (val > 50) {
+                stakes = "Rising Dramatic Pressure";
+                color = "#f59e0b"; // amber-500
+            }
+            return {
+                shotIndex: idx,
+                intensity: val,
+                dramaticStakes: stakes,
+                colorHex: color
+            };
+        });
+    };
+
+    try {
+        return await apiCallWithRetry(async () => {
+            const ai = getClient();
+            const segmentsList = frames.map((f, idx) => ({
+                index: idx,
+                scene: f.sceneName || `Scene ${idx + 1}`,
+                shotType: f.shotType || 'Standard Shot',
+                scriptSegment: f.scriptSegment || '',
+                notes: f.notes || ''
+            }));
+
+            const prompt = `You are a film editor, narrative pacing consultant, and dramaturgist.
+Analyze the following sequential storyboard frames and evaluate the "Emotional Intensity" and dramatic stakes for EACH shot in sequence.
+
+Emotional Intensity scale: 0 to 100
+0 = completely serene, calm, ambient baseline.
+50 = moderate engagement, rising curiosity, standard dialogue.
+80+ = extreme adrenaline, terrifying shock, climactic emotional peak, heartbreaking revelation.
+
+Storyboard Shots:
+${JSON.stringify(segmentsList, null, 2)}
+
+Respond ONLY with valid JSON matching this schema:
+{
+  "points": [
+    {
+      "shotIndex": number,
+      "intensity": number,
+      "dramaticStakes": "Short 2-4 word descriptor (e.g. 'Tense Standoff', 'Quiet Contemplation', 'Sudden Betrayal')",
+      "colorHex": "Hex color code representing mood e.g. #38bdf8 (calm/cool), #f59e0b (rising tension), #ef4444 (high stakes crisis), #a855f7 (mysterious suspense)"
+    }
+  ]
+}`;
+
+            const response = await ai.models.generateContent({
+                model: 'gemini-3.8-flash',
+                contents: [{ parts: [{ text: prompt }] }],
+                config: {
+                    responseMimeType: 'application/json',
+                    temperature: 0.3
+                }
+            });
+
+            const parsed = JSON.parse(response.text || '{}');
+            if (Array.isArray(parsed.points) && parsed.points.length === frames.length) {
+                return parsed.points.map((p: any, i: number) => ({
+                    shotIndex: typeof p.shotIndex === 'number' ? p.shotIndex : i,
+                    intensity: Math.max(5, Math.min(100, Math.round(Number(p.intensity) || 50))),
+                    dramaticStakes: p.dramaticStakes || "Narrative Arc",
+                    colorHex: p.colorHex || (p.intensity > 70 ? "#ef4444" : p.intensity > 45 ? "#f59e0b" : "#38bdf8")
+                }));
+            }
+            return generateFallbackIntensity();
+        }, { maxRetries: 2, taskName: 'Script Emotional Intensity Analysis' });
+    } catch (err) {
+        console.warn("Script emotional intensity analysis fallback:", err);
+        return generateFallbackIntensity();
+    }
+};
+
 
 
 

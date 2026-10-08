@@ -1,9 +1,16 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { LoreEntry, ThematicTaxonomyItem } from '../types.ts';
 import { LoreIcon, FolderIcon } from './icons.tsx';
 import { LoreNetwork } from './LoreNetwork.tsx';
-import { batchCategorizeWithGemini, geminiCircuitBreaker, resetGeminiCircuitBreaker, CircuitBreakerStatus } from '../services/geminiService.ts';
+import { 
+    batchCategorizeWithGemini, 
+    geminiCircuitBreaker, 
+    resetGeminiCircuitBreaker, 
+    CircuitBreakerStatus,
+    checkLoreEntryInconsistencyService,
+    LoreInconsistencyResult
+} from '../services/geminiService.ts';
 import { EntityTimeline } from './EntityTimeline.tsx';
 import { LoreBatchAuditTool } from './LoreBatchAuditTool.tsx';
 import { NarrativeDriftDiffTool } from './NarrativeDriftDiffTool.tsx';
@@ -359,6 +366,16 @@ export const LoreStudio: React.FC<LoreStudioProps> = ({
     const [selectedProjectId, setSelectedProjectId] = useState('');
     const [editingId, setEditingId] = useState<string | null>(null);
 
+    // Background Inconsistency Scanner State & Toast
+    const [isScanningConsistency, setIsScanningConsistency] = useState<boolean>(false);
+    const [inconsistencyToast, setInconsistencyToast] = useState<{
+        newTitle: string;
+        clashingTitle?: string;
+        explanation?: string;
+        resolution?: string;
+        severity?: string;
+    } | null>(null);
+
     // Database states for heatmap calculations
     const [tripletEdges, setTripletEdges] = useState<any[]>([]);
     const [vectors, setVectors] = useState<any[]>([]);
@@ -409,12 +426,44 @@ export const LoreStudio: React.FC<LoreStudioProps> = ({
         }
     }, [projects, selectedProjectId]);
 
-    const handleCreate = (e: React.FormEvent) => {
+    const handleCreate = async (e: React.FormEvent) => {
         e.preventDefault();
         if (newTitle.trim() && newContent.trim() && selectedProjectId) {
-            onCreate(newTitle, newContent, selectedProjectId);
+            const draftedTitle = newTitle.trim();
+            const draftedContent = newContent.trim();
+            const targetPid = selectedProjectId;
+
+            // Commit the new lore entry immediately to maintain responsive UX
+            onCreate(draftedTitle, draftedContent, targetPid);
             setNewTitle('');
             setNewContent('');
+
+            // Trigger Background Scanner using Gemini API against existing project lore entries
+            const existingEntries = lore.filter(l => l.projectId === targetPid);
+            if (existingEntries.length > 0) {
+                setIsScanningConsistency(true);
+                try {
+                    const result = await checkLoreEntryInconsistencyService(
+                        draftedTitle,
+                        draftedContent,
+                        existingEntries.map(e => ({ id: e.id, title: e.title, content: e.content }))
+                    );
+
+                    if (result && result.hasContradiction) {
+                        setInconsistencyToast({
+                            newTitle: draftedTitle,
+                            clashingTitle: result.contradictingEntryTitle,
+                            explanation: result.explanation || 'Logical inconsistency detected against existing lore bible entries.',
+                            resolution: result.suggestedResolution,
+                            severity: result.severity || 'high'
+                        });
+                    }
+                } catch (scanErr) {
+                    console.warn("Background lore consistency scan failed:", scanErr);
+                } finally {
+                    setIsScanningConsistency(false);
+                }
+            }
         }
     };
 
@@ -491,6 +540,67 @@ export const LoreStudio: React.FC<LoreStudioProps> = ({
                         <span>Download Lorepack</span>
                     </button>
                 </div>
+
+                {/* Background Consistency Scanner In-Progress Pulse Indicator */}
+                {isScanningConsistency && (
+                    <div className="mb-4 bg-blue-950/40 border border-blue-500/40 rounded-xl px-4 py-2.5 flex items-center justify-between text-xs text-blue-200 animate-pulse">
+                        <div className="flex items-center gap-2.5 font-mono">
+                            <span className="w-2.5 h-2.5 rounded-full bg-blue-400 animate-ping inline-block" />
+                            <span>Continuity Sentinel: Gemini background scanner comparing new lore against universe canon...</span>
+                        </div>
+                        <span className="text-[10px] text-blue-400 font-bold uppercase tracking-wider font-mono">Scanning Continuity</span>
+                    </div>
+                )}
+
+                {/* LOGICAL INCONSISTENCY CONTRADICTION WARNING TOAST */}
+                {inconsistencyToast && (
+                    <div className="mb-6 bg-gradient-to-r from-red-950/90 via-black to-red-950/90 border-2 border-red-500/80 rounded-2xl p-4 shadow-[0_0_30px_rgba(239,68,68,0.35)] flex flex-col md:flex-row justify-between items-start md:items-center gap-4 animate-fade-in backdrop-blur-md">
+                        <div className="flex items-start gap-3.5">
+                            <span className="w-3.5 h-3.5 rounded-full bg-red-500 animate-ping shrink-0 mt-1" />
+                            <div className="space-y-1">
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <span className="text-xs font-black text-red-400 uppercase tracking-widest font-mono">
+                                        ⚠️ Continuity Warning: Logical Inconsistency Found
+                                    </span>
+                                    <span className="text-[10px] bg-red-900/60 text-red-200 border border-red-600/50 px-2 py-0.5 rounded-full font-mono font-bold">
+                                        Severity: {inconsistencyToast.severity?.toUpperCase()}
+                                    </span>
+                                </div>
+                                <p className="text-xs text-neutral-200 leading-relaxed">
+                                    Entry <strong className="text-white">"{inconsistencyToast.newTitle}"</strong> conflicts with existing canon
+                                    {inconsistencyToast.clashingTitle && (
+                                        <> in <strong className="text-red-300">"{inconsistencyToast.clashingTitle}"</strong></>
+                                    )}:
+                                </p>
+                                <p className="text-[11px] text-neutral-400 font-mono italic bg-black/60 p-2.5 rounded-lg border border-red-900/40">
+                                    "{inconsistencyToast.explanation}"
+                                </p>
+                                {inconsistencyToast.resolution && (
+                                    <p className="text-[10px] text-emerald-400 font-mono mt-1">
+                                        💡 Suggested Fix: {inconsistencyToast.resolution}
+                                    </p>
+                                )}
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0 self-end md:self-center">
+                            <button
+                                onClick={() => setInconsistencyToast(null)}
+                                className="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 hover:text-white text-xs font-bold rounded-lg transition-colors cursor-pointer"
+                            >
+                                Dismiss Warning
+                            </button>
+                            <button
+                                onClick={() => {
+                                    setActiveTab('audit');
+                                    setInconsistencyToast(null);
+                                }}
+                                className="px-3.5 py-1.5 bg-red-600 hover:bg-red-500 text-white text-xs font-black uppercase tracking-wider rounded-lg transition-colors shadow-md cursor-pointer font-mono"
+                            >
+                                Open Lore Audit →
+                            </button>
+                        </div>
+                    </div>
+                )}
 
                 {/* Circuit Breaker Status Banner */}
                 {circuitStatus.state === 'OPEN' && (
