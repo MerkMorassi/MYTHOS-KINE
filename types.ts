@@ -1047,6 +1047,22 @@ export interface KnowledgeInsightsReport {
   recommendedActionPlan: string[];
   analyzedAt: string;
 }
+
+export interface MoodPalette {
+  id: string;
+  name: string;
+  colors: string[]; // hex codes
+  description: string;
+  visualStyleKeywords: string;
+  thematicJustification: string;
+}
+
+export interface CinematicMoodReport {
+  palettes: MoodPalette[];
+  dominantThemes: string[];
+  suggestedAestheticStyle: string;
+  generatedAt: string;
+}
   
 declare global {
     interface AIStudio {

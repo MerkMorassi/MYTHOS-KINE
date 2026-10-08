@@ -3522,6 +3522,187 @@ Respond ONLY with a valid JSON object matching this schema:
     }
 };
 
+// --- CINEMATIC MOOD PALETTE GENERATOR SERVICE ---
+// --- LIGHTING PREVIEW INFERENCE SERVICE ---
+export const inferLightingPreviewService = async (
+    frameDescription: string,
+    emotionalTone: string,
+    visualStyle?: string
+): Promise<{
+    lightSources: Array<{ x: number, y: number, intensity: number, color: string, radius: number }>,
+    shadowAreas: Array<{ x: number, y: number, width: number, height: number, blur: number, opacity: number }>,
+    globalAmbientColor: string,
+    globalBrightness: number,
+    vignetteIntensity: number
+}> => {
+    return apiCallWithRetry(async () => {
+        const ai = getClient();
+        const prompt = `You are a cinematic lighting designer and virtual cinematographer.
+Analyze the following scene context and emotional tone to predict the optimal lighting and shadow distribution for a storyboard frame.
+
+Scene Description: ${frameDescription}
+Emotional Tone: ${emotionalTone}
+Visual Style: ${visualStyle || 'Cinematic'}
+
+Return a JSON object representing the lighting setup. Coordinates are 0-100 (relative to frame width/height).
+- lightSources: Array of key light sources.
+- shadowAreas: Array of major shadow/darkness zones.
+- globalAmbientColor: CSS color string (e.g. #0a0a20).
+- globalBrightness: 0.1 to 1.5.
+- vignetteIntensity: 0 to 1.
+
+JSON structure:
+{
+  "lightSources": [
+    { "x": 80, "y": 20, "intensity": 0.8, "color": "#fffae0", "radius": 150 }
+  ],
+  "shadowAreas": [
+    { "x": 0, "y": 60, "width": 100, "height": 40, "blur": 20, "opacity": 0.5 }
+  ],
+  "globalAmbientColor": "#050510",
+  "globalBrightness": 0.9,
+  "vignetteIntensity": 0.4
+}`;
+
+        const response = await ai.models.generateContent({
+            model: "gemini-3.8-flash",
+            contents: [{ parts: [{ text: prompt }] }],
+            config: {
+                responseMimeType: "application/json"
+            }
+        });
+
+        try {
+            return JSON.parse(response.text.trim());
+        } catch {
+            // Fallback default lighting
+            return {
+                lightSources: [{ x: 20, y: 20, intensity: 0.6, color: "#ffffff", radius: 100 }],
+                shadowAreas: [{ x: 50, y: 50, width: 50, height: 50, blur: 30, opacity: 0.3 }],
+                globalAmbientColor: "#101010",
+                globalBrightness: 1.0,
+                vignetteIntensity: 0.2
+            };
+        }
+    });
+};
+
+export const generateCinematicMoodPalettes = async (params: {
+    selectedLore: LoreEntry[];
+    projectName?: string;
+}): Promise<CinematicMoodReport> => {
+    const { selectedLore, projectName = "Cinematic Project" } = params;
+
+    const generateFallbackMoodReport = (): CinematicMoodReport => ({
+        palettes: [
+            {
+                id: 'pal_fallback_1',
+                name: "Noir Cyberpunk",
+                colors: ["#0a0a0c", "#1a1a2e", "#0f3460", "#e94560", "#16213e"],
+                description: "Deep shadows with electric crimson highlights.",
+                visualStyleKeywords: "Low-key, high contrast, neon accents",
+                thematicJustification: "Selected based on general cinematic drama defaults."
+            },
+            {
+                id: 'pal_fallback_2',
+                name: "Golden Age Epic",
+                colors: ["#2c1e1a", "#7a5c48", "#c4a484", "#e1c699", "#f5f5dc"],
+                description: "Warm, sepia-toned desert hues and sun-drenched highlights.",
+                visualStyleKeywords: "Warm, saturated, diffused lighting",
+                thematicJustification: "Standard epic historical palette."
+            }
+        ],
+        dominantThemes: ["General Drama", "Cinematic Atmosphere"],
+        suggestedAestheticStyle: "Anamorphic Cinematic",
+        generatedAt: new Date().toISOString()
+    });
+
+    if (selectedLore.length === 0) return generateFallbackMoodReport();
+
+    try {
+        return await apiCallWithRetry(async () => {
+            const ai = getClient();
+            
+            const loreContext = selectedLore.map(l => ({
+                title: l.title,
+                content: l.content.slice(0, 500),
+                tags: l.tags || []
+            }));
+
+            const prompt = `You are a World-Class Cinematic Colorist and Visual Development Artist.
+PROJECT: ${projectName}
+
+TASK:
+Analyze the following lore entries and generate 3 distinct, highly specific "Cinematic Mood Palettes" that capture the visual soul of these narrative elements.
+Each palette must include a set of 5 hex colors and a technical visual style description for directors of photography.
+
+LORE CONTEXT:
+${JSON.stringify(loreContext, null, 2)}
+
+INSTRUCTIONS:
+1. Identify the dominant emotional and thematic undertones (e.g. "Dread", "Technological Decay", "Fading Nobility").
+2. For each of the 3 palettes, provide:
+   - name: Evocative title (e.g. "The Obsidian Shroud", "Veridian Wasteland").
+   - colors: Exactly 5 CSS hex codes (e.g. ["#000000", ...]).
+   - description: 1-2 sentences on the emotional impact of this color grading.
+   - visualStyleKeywords: Technical terms for lighting and grading (e.g. "High-key, pastel desaturation, soft bloom").
+   - thematicJustification: Briefly explain why this palette fits the provided lore.
+
+3. Also provide:
+   - dominantThemes: Top 3 narrative themes identified.
+   - suggestedAestheticStyle: A single comprehensive style descriptor (e.g. "Gritty Hyperrealism", "Retro-Futurist Noir").
+
+Respond ONLY with a valid JSON object matching this schema:
+{
+  "palettes": [
+    {
+      "id": "unique_id",
+      "name": "...",
+      "colors": ["#...", "#...", "#...", "#...", "#..."],
+      "description": "...",
+      "visualStyleKeywords": "...",
+      "thematicJustification": "..."
+    }
+  ],
+  "dominantThemes": ["...", "...", "..."],
+  "suggestedAestheticStyle": "..."
+}`;
+
+            const response = await ai.models.generateContent({
+                model: 'gemini-3.8-flash',
+                contents: [{ parts: [{ text: prompt }] }],
+                config: {
+                    responseMimeType: 'application/json',
+                    temperature: 0.7
+                }
+            });
+
+            try {
+                const parsed = JSON.parse(response.text || '{}');
+                return {
+                    palettes: Array.isArray(parsed.palettes) ? parsed.palettes.map((p: any, i: number) => ({
+                        id: p.id || `pal_${Date.now()}_${i}`,
+                        name: p.name || `Palette ${i + 1}`,
+                        colors: Array.isArray(p.colors) ? p.colors : ["#000000", "#333333", "#666666", "#999999", "#CCCCCC"],
+                        description: p.description || "",
+                        visualStyleKeywords: p.visualStyleKeywords || "",
+                        thematicJustification: p.thematicJustification || ""
+                    })) : generateFallbackMoodReport().palettes,
+                    dominantThemes: Array.isArray(parsed.dominantThemes) ? parsed.dominantThemes : [],
+                    suggestedAestheticStyle: parsed.suggestedAestheticStyle || "Cinematic",
+                    generatedAt: new Date().toISOString()
+                };
+            } catch (err) {
+                console.warn("Failed to parse Mood Palette response:", err);
+                return generateFallbackMoodReport();
+            }
+        }, { maxRetries: 2, taskName: 'Cinematic Mood Palette Generation' });
+    } catch (e) {
+        console.warn("Mood Palette generation fallback:", e);
+        return generateFallbackMoodReport();
+    }
+};
+
 
 
 

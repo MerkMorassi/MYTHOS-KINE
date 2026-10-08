@@ -886,7 +886,17 @@ export const App = () => {
             case 'core': return <CoreStudio agent={coreAgent('agent-core')} onNavigate={handleNavigate} onOpenChat={(mode) => openChatModal(coreAgent('agent-core'), mode)} />;
             case 'ideation': return <IdeationStudio agent={coreAgent('agent-ideation')} onNavigate={handleNavigate} onOpenChat={(mode) => openChatModal(coreAgent('agent-ideation'), mode)} />;
             case 'scripting': return <ScriptingStudio agent={coreAgent('agent-scripting')} onNavigate={handleNavigate} onOpenChat={(mode) => openChatModal(coreAgent('agent-scripting'), mode)} scriptText={project.data.scriptText} scriptsBin={project.data.scriptsBin} onDeleteScript={(id) => updateProjectData({ scriptsBin: project.data.scriptsBin.filter(s => s.id !== id) })} onScriptUpload={(f) => { const r = new FileReader(); r.onload = e => updateProjectData({ scriptText: e.target?.result as string }); r.readAsText(f); }} />;
-            case 'design': return <DesignStudio agent={coreAgent('agent-design')} onNavigate={handleNavigate} onOpenChat={(mode) => openChatModal(coreAgent('agent-design'), mode)} />;
+            case 'design': return <DesignStudio 
+                agent={coreAgent('agent-design')} 
+                lore={project.data.lore}
+                storyboard={project.data.storyboard}
+                projectName={project.name}
+                onNavigate={handleNavigate} 
+                onOpenChat={(mode) => openChatModal(coreAgent('agent-design'), mode)} 
+                onUpdateFrame={(id, updates) => updateProjectData({ 
+                    storyboard: project.data.storyboard.map(f => f.id === id ? { ...f, ...updates } : f) 
+                })}
+            />;
             case 'art': return <ArtStudio agent={coreAgent('agent-art')} onNavigate={handleNavigate} onOpenChat={(mode) => openChatModal(coreAgent('agent-art'), mode)} />;
             
             // Tools
@@ -970,7 +980,7 @@ export const App = () => {
             case 'dubbing-studio': return <DubbingStudio state={project.data.dubbingState} onStateUpdate={s => updateProjectData({ dubbingState: s })} onAddAssetToGrid={handleAddAssetToGrid} onAddToStoryboard={handleAddToStoryboard} projects={[{ id: project.id, name: project.name }]} activeProjectId={project.id} />;
 
             // Assets
-            case 'grid': return <ImageGrid images={project.data.images} isLoading={false} error={null} onViewImage={() => {}} gridOverlay='none' onGridOverlayChange={() => {}} onEditImage={() => {}} onAddToStoryboard={handleAddToStoryboard} onAddToInspiration={handleAddToInspiration} onUpscaleImage={() => {}} agents={project.data.agents} onAssignAgentToImage={(iid, aid) => updateProjectData({ images: project.data.images.map(i => i.id === iid ? { ...i, agentId: aid || undefined } : i) })} onCreateAgent={(d) => { const newAgent = { ...d, id: `agent_${Date.now()}` } as Agent; updateProjectData({ agents: [...project.data.agents, newAgent] }); return newAgent; }} agentFilter={agentFilter} onAgentFilterChange={setAgentFilter} awaitingExternalGeneration={false} showGridSelectors={false} onUploadImage={handleAddAssetToGrid} onUpdateImages={(newImages) => updateProjectData({ images: newImages })} />;
+            case 'grid': return <ImageGrid images={project.data.images} isLoading={false} error={null} onViewImage={() => {}} gridOverlay='none' onGridOverlayChange={() => {}} onEditImage={() => {}} onAddToStoryboard={handleAddToStoryboard} onAddToInspiration={handleAddToInspiration} onUpscaleImage={() => {}} agents={project.data.agents} lore={project.data.lore} onAssignAgentToImage={(iid, aid) => updateProjectData({ images: project.data.images.map(i => i.id === iid ? { ...i, agentId: aid || undefined } : i) })} onCreateAgent={(d) => { const newAgent = { ...d, id: `agent_${Date.now()}` } as Agent; updateProjectData({ agents: [...project.data.agents, newAgent] }); return newAgent; }} agentFilter={agentFilter} onAgentFilterChange={setAgentFilter} awaitingExternalGeneration={false} showGridSelectors={false} onUploadImage={handleAddAssetToGrid} onUpdateImages={(newImages) => updateProjectData({ images: newImages })} />;
             case 'story': return (
                 <Storyboard 
                     frames={project.data.storyboard} 

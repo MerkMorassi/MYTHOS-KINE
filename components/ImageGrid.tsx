@@ -28,6 +28,7 @@ interface ImageGridProps {
   showGridSelectors?: boolean;
   onUploadImage?: (asset: { type: 'image' | 'video'; base64?: string; url?: string; mimeType?: string }) => void;
   onUpdateImages?: (images: ImageState[]) => void;
+  lore?: LoreEntry[];
 }
 
 const gridOptions: { id: GridOverlayType; label: string }[] = [
@@ -133,22 +134,105 @@ const AssignAgentControl: React.FC<{
     );
 };
 
-export const ImageGrid: React.FC<ImageGridProps> = ({ images, isLoading, error, progressMessage, onViewImage, gridOverlay, onGridOverlayChange, onEditImage, onAddToStoryboard, onAddToInspiration, onUpscaleImage, agents, onAssignAgentToImage, onCreateAgent, agentFilter, onAgentFilterChange, awaitingExternalGeneration, showGridSelectors = true, onUploadImage, onUpdateImages }) => {
+export const ImageGrid: React.FC<ImageGridProps> = ({ images, isLoading, error, progressMessage, onViewImage, gridOverlay, onGridOverlayChange, onEditImage, onAddToStoryboard, onAddToInspiration, onUpscaleImage, agents, onAssignAgentToImage, onCreateAgent, agentFilter, onAgentFilterChange, awaitingExternalGeneration, showGridSelectors = true, onUploadImage, onUpdateImages, lore = [] }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   // Bulk selection and folders state
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [selectedFolder, setSelectedFolder] = useState<string>('all');
+  const [selectedFilterTags, setSelectedFilterTags] = useState<string[]>([]);
   const [newFolderName, setNewFolderName] = useState<string>('');
   const [showFolderDropdown, setShowFolderDropdown] = useState<boolean>(false);
   const [bulkTagInput, setBulkTagInput] = useState<string>('');
   
+  const [isSelectionMode, setIsSelectionMode] = useState<boolean>(false);
   const [activeAssignOpen, setActiveAssignOpen] = useState(false);
   const [activeMoveOpen, setActiveMoveOpen] = useState(false);
   const [activeTagOpen, setActiveTagOpen] = useState(false);
+  const [activeLoreOpen, setActiveLoreOpen] = useState(false);
 
   // AI Auto-Tagging tracking state
   const [taggingIds, setTaggingIds] = useState<string[]>([]);
+  const [isTagManagementModalOpen, setIsTagManagementModalOpen] = useState<boolean>(false);
+  const [hoveredTag, setHoveredTag] = useState<string | null>(null);
+
+  // Tag frequency for cloud visualization
+  const tagFrequency = images.flatMap(img => img.tags || []).reduce((acc, tag) => {
+      acc[tag] = (acc[tag] || 0) + 1;
+      return acc;
+  }, {} as Record<string, number>);
+
+  const maxFreq = Math.max(...Object.values(tagFrequency), 1);
+
+  const handleDropOnTag = (e: React.DragEvent, targetTag: string) => {
+      e.preventDefault();
+      const imageId = e.dataTransfer.getData('imageId');
+      const isBulk = e.dataTransfer.getData('isBulk') === 'true';
+      
+      if (!onUpdateImages) return;
+      
+      const idsToUpdate = isBulk ? selectedIds : [imageId];
+      if (idsToUpdate.length === 0 && !imageId) return;
+
+      const updated = images.map(img => {
+          if (idsToUpdate.includes(img.id)) {
+              const existingTags = img.tags || [];
+              if (!existingTags.includes(targetTag)) {
+                  return { ...img, tags: [...existingTags, targetTag] };
+              }
+          }
+          return img;
+      });
+      onUpdateImages(updated);
+      if (isBulk) setSelectedIds([]);
+  };
+
+  const handleExportTagReport = () => {
+      if (allAvailableTags.length === 0) return;
+      
+      const headers = ['Tag', 'Asset Count', 'Prevalence (%)'];
+      const rows = allAvailableTags.map(tag => {
+          const count = tagFrequency[tag] || 0;
+          const prevalence = ((count / images.length) * 100).toFixed(1);
+          return [tag, count, prevalence];
+      });
+
+      const csvContent = [
+          headers.join(','),
+          ...rows.map(row => row.join(','))
+      ].join('\n');
+
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.setAttribute('href', url);
+      link.setAttribute('download', `mythos-tag-report-${new Date().toISOString().split('T')[0]}.csv`);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+  };
+
+  const handleGlobalTagUpdate = (oldTag: string, newTag: string | null) => {
+      if (!onUpdateImages) return;
+      const updated = images.map(img => {
+          const tags = img.tags || [];
+          if (!tags.includes(oldTag)) return img;
+          
+          let newTags;
+          if (newTag === null) {
+              // Delete
+              newTags = tags.filter(t => t !== oldTag);
+          } else {
+              // Rename
+              newTags = tags.map(t => t === oldTag ? newTag : t);
+              // Ensure uniqueness
+              newTags = Array.from(new Set(newTags));
+          }
+          return { ...img, tags: newTags };
+      });
+      onUpdateImages(updated);
+  };
 
   const handleAutoTagSingle = async (image: ImageState) => {
       if (!onUpdateImages) return;
@@ -253,10 +337,18 @@ export const ImageGrid: React.FC<ImageGridProps> = ({ images, isLoading, error, 
       }
   };
 
-  // Base filtered images (by search/filter query)
+  // Base filtered images (by search/filter query and selected tags)
   const filteredImages = images.filter(image => {
-      if (!agentFilter) return true;
       const searchLower = agentFilter.toLowerCase();
+      
+      // Multi-tag filtering: Image must have ALL selected filter tags
+      if (selectedFilterTags.length > 0) {
+          const imageTags = image.tags || [];
+          const hasAllTags = selectedFilterTags.every(tag => imageTags.includes(tag));
+          if (!hasAllTags) return false;
+      }
+
+      if (!agentFilter) return true;
       
       // Check agent name match
       const agentName = image.agentId ? agents.find(c => c.id === image.agentId)?.name : '';
@@ -267,6 +359,9 @@ export const ImageGrid: React.FC<ImageGridProps> = ({ images, isLoading, error, 
       
       return false;
   });
+
+  // Unique tags list for sidebar filtering
+  const allAvailableTags = Array.from(new Set(images.flatMap(img => img.tags || []))).sort();
 
   // Unique folders list
   const folderList = Array.from(new Set(images.map(img => img.folder).filter(Boolean))) as string[];
@@ -421,10 +516,139 @@ export const ImageGrid: React.FC<ImageGridProps> = ({ images, isLoading, error, 
   };
 
   return (
-    <div className="p-6 h-full overflow-y-auto custom-scrollbar space-y-5">
-        {/* Horizontal folders browsing list */}
-        {onUpdateImages && (
-            <div className="bg-neutral-900 border border-neutral-800 p-4 rounded-xl space-y-3 shadow-md">
+    <div className="p-6 h-full flex flex-col lg:flex-row gap-6 overflow-hidden">
+        {/* Tag Filtering Sidebar */}
+        <div className="w-full lg:w-64 flex-shrink-0 flex flex-col bg-neutral-900 border border-neutral-800 rounded-2xl shadow-xl overflow-hidden">
+            <div className="p-4 border-b border-neutral-800 flex justify-between items-center bg-black/20">
+                <span className="text-[10px] font-black text-neutral-400 uppercase tracking-widest flex items-center gap-2">
+                    <span>🏷️</span> Filter by Tags
+                </span>
+                {selectedFilterTags.length > 0 && (
+                    <button 
+                        onClick={() => setSelectedFilterTags([])}
+                        className="text-[9px] text-rose-400 hover:text-rose-300 font-bold uppercase"
+                    >
+                        Clear All
+                    </button>
+                )}
+            </div>
+
+            {/* Tag Cloud Visualization */}
+            {allAvailableTags.length > 0 && (
+                <div className="p-4 border-b border-neutral-800 bg-neutral-950/30">
+                    <div className="text-[9px] font-black text-neutral-500 uppercase tracking-widest mb-3">Tag Cloud</div>
+                    <div className="flex flex-wrap gap-2 justify-center">
+                        {allAvailableTags.map(tag => {
+                            const freq = tagFrequency[tag] || 0;
+                            const isSelected = selectedFilterTags.includes(tag);
+                            // Scale from text-xs to text-lg based on frequency
+                            const sizeClass = freq > maxFreq * 0.8 ? 'text-lg' : freq > maxFreq * 0.5 ? 'text-base' : freq > maxFreq * 0.2 ? 'text-sm' : 'text-xs';
+                            
+                            return (
+                                <button
+                                    key={`cloud-${tag}`}
+                                    onClick={() => setSelectedFilterTags(prev => 
+                                        isSelected ? prev.filter(t => t !== tag) : [...prev, tag]
+                                    )}
+                                    onDragOver={(e) => { e.preventDefault(); setHoveredTag(tag); }}
+                                    onDragLeave={() => setHoveredTag(null)}
+                                    onDrop={(e) => { handleDropOnTag(e, tag); setHoveredTag(null); }}
+                                    className={`transition-all hover:scale-110 active:scale-95 ${sizeClass} ${
+                                        isSelected ? 'text-blue-400 font-bold' : 'text-neutral-400 hover:text-neutral-200'
+                                    } ${hoveredTag === tag ? 'bg-blue-500/20 rounded-md px-1' : ''}`}
+                                    title={`${tag} (${freq} uses)`}
+                                >
+                                    {tag}
+                                </button>
+                            );
+                        })}
+                    </div>
+                </div>
+            )}
+            
+            <div className="flex-grow overflow-y-auto custom-scrollbar p-3 space-y-1">
+                {allAvailableTags.length === 0 ? (
+                    <div className="text-[10px] text-neutral-600 italic p-4 text-center">
+                        No tags found in vault.
+                    </div>
+                ) : (
+                    allAvailableTags.map(tag => {
+                        const isSelected = selectedFilterTags.includes(tag);
+                        const count = tagFrequency[tag] || 0;
+                        const heatWidth = (count / maxFreq) * 100;
+                        
+                        return (
+                            <button
+                                key={tag}
+                                onClick={() => setSelectedFilterTags(prev => 
+                                    isSelected ? prev.filter(t => t !== tag) : [...prev, tag]
+                                )}
+                                onDragOver={(e) => { e.preventDefault(); setHoveredTag(tag); }}
+                                onDragLeave={() => setHoveredTag(null)}
+                                onDrop={(e) => { handleDropOnTag(e, tag); setHoveredTag(null); }}
+                                className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs transition-all group relative overflow-hidden ${
+                                    isSelected 
+                                        ? 'bg-blue-600/20 text-blue-300 border border-blue-500/30' 
+                                        : hoveredTag === tag
+                                            ? 'bg-blue-900/40 text-blue-200 border-blue-500/50'
+                                            : 'text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200 border border-transparent'
+                                }`}
+                            >
+                                {/* Heatmap Overlay Bar */}
+                                <div 
+                                    className={`absolute left-0 top-0 bottom-0 opacity-10 transition-all duration-1000 ${isSelected ? 'bg-blue-400' : 'bg-neutral-500 group-hover:bg-blue-500'}`}
+                                    style={{ width: `${heatWidth}%` }}
+                                />
+                                
+                                <span className="truncate flex items-center gap-2 relative z-10">
+                                    <span className={`w-1.5 h-1.5 rounded-full ${isSelected ? 'bg-blue-400' : 'bg-neutral-700 group-hover:bg-neutral-500'}`} />
+                                    {tag}
+                                </span>
+                                <span className={`text-[9px] font-mono relative z-10 ${isSelected ? 'text-blue-300' : 'text-neutral-600'}`}>
+                                    {count}
+                                </span>
+                            </button>
+                        );
+                    })
+                )}
+            </div>
+            
+            <div className="p-4 bg-black/40 border-t border-neutral-800 space-y-3">
+                <div className="grid grid-cols-2 gap-2">
+                    <button
+                        onClick={() => setIsTagManagementModalOpen(true)}
+                        className="py-2 bg-neutral-800 hover:bg-neutral-700 text-[10px] text-neutral-300 font-black uppercase tracking-widest rounded-lg border border-neutral-700 transition-all flex items-center justify-center gap-2"
+                        title="Manage project-wide tags"
+                    >
+                        <span>⚙️</span> Tags
+                    </button>
+                    <button
+                        onClick={handleExportTagReport}
+                        className="py-2 bg-indigo-900/30 hover:bg-indigo-900/50 text-[10px] text-indigo-300 font-black uppercase tracking-widest rounded-lg border border-indigo-500/30 transition-all flex items-center justify-center gap-2"
+                        title="Export tag distribution report as CSV"
+                    >
+                        <span>📊</span> Export
+                    </button>
+                </div>
+                <div className="text-[9px] text-neutral-500 uppercase font-black tracking-tighter mb-2">Smart Filter Stats</div>
+                <div className="space-y-1.5">
+                    <div className="flex justify-between text-[10px]">
+                        <span className="text-neutral-400">Total Assets</span>
+                        <span className="text-neutral-200 font-bold">{images.length}</span>
+                    </div>
+                    <div className="flex justify-between text-[10px]">
+                        <span className="text-neutral-400">Showing</span>
+                        <span className="text-blue-400 font-bold">{visibleImages.length}</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        {/* Main Grid Content */}
+        <div className="flex-grow flex flex-col gap-5 overflow-y-auto custom-scrollbar pr-2">
+            {/* Horizontal folders browsing list */}
+            {onUpdateImages && (
+                <div className="bg-neutral-900 border border-neutral-800 p-4 rounded-xl space-y-3 shadow-md shrink-0">
                  <div className="flex items-center justify-between border-b border-neutral-800/80 pb-2">
                      <span className="text-[10px] font-black text-neutral-400 uppercase tracking-wider block">Browse Folders</span>
                      <button 
@@ -487,220 +711,276 @@ export const ImageGrid: React.FC<ImageGridProps> = ({ images, isLoading, error, 
             </div>
         )}
 
-        {/* Bulk action toolbar block */}
-        {selectedIds.length > 0 && onUpdateImages && (
-            <div className="bg-neutral-900 border border-blue-500/30 p-4 rounded-xl flex flex-col md:flex-row items-center justify-between gap-4 shadow-xl">
-                <div className="flex items-center gap-3">
-                    <span className="text-xs font-black bg-blue-500/20 text-blue-400 px-3 py-1.5 rounded-lg border border-blue-500/20 font-mono">
-                        {selectedIds.length} SELECTED
-                    </span>
+        {/* Bulk action toolbar block - Sticky at the top */}
+        {(selectedIds.length > 0 || isSelectionMode) && onUpdateImages && (
+            <div className={`sticky top-0 z-40 bg-neutral-900/95 backdrop-blur-md border ${selectedIds.length > 0 ? 'border-blue-500/50' : 'border-neutral-800'} p-4 rounded-xl flex flex-col md:flex-row items-center justify-between gap-4 shadow-2xl transition-all mb-2`}>
+                <div className="flex items-center gap-4">
+                    <div className={`flex items-center gap-2 px-3 py-2 rounded-lg border transition-all ${selectedIds.length > 0 ? 'bg-blue-600/20 border-blue-500/50 text-blue-400' : 'bg-neutral-800 border-neutral-700 text-neutral-500'}`}>
+                        <span className={`w-2 h-2 rounded-full ${selectedIds.length > 0 ? 'bg-blue-500 animate-pulse' : 'bg-neutral-600'}`} />
+                        <span className="text-xs font-black font-mono tracking-wider">{selectedIds.length} ASSETS SELECTED</span>
+                    </div>
+                    
+                    {selectedIds.length > 0 && (
+                        <button
+                            type="button"
+                            onClick={toggleSelectAll}
+                            className="text-[10px] text-neutral-400 hover:text-white transition-colors uppercase font-black tracking-widest border-b border-neutral-700 hover:border-white"
+                        >
+                            {isAllSelected ? "Deselect All" : "Select All Visible"}
+                        </button>
+                    )}
+
                     <button
                         type="button"
-                        onClick={toggleSelectAll}
-                        className="text-xs text-neutral-400 hover:text-white transition-colors underline font-medium"
+                        onClick={() => {
+                            setSelectedIds([]);
+                            setIsSelectionMode(false);
+                        }}
+                        className="flex items-center gap-1.5 px-3 py-2 bg-rose-600 hover:bg-rose-700 text-white text-[10px] font-black uppercase tracking-widest rounded-lg transition-all shadow-lg shadow-rose-900/20 ml-2"
                     >
-                        {isAllSelected ? "Deselect All" : "Select All Shown"}
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => setSelectedIds([])}
-                        className="text-xs text-neutral-400 hover:text-white transition-colors underline font-medium ml-2"
-                    >
-                        Clear Selection
+                        <span>✕</span>
+                        <span>Cancel Selection</span>
                     </button>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-2 w-full md:w-auto justify-end">
-                    {/* Bulk Agent assign dropdown */}
-                    <div className="relative">
-                        <button
-                            type="button"
-                            onClick={() => {
-                                setActiveAssignOpen(!activeAssignOpen);
-                                setActiveMoveOpen(false);
-                                setActiveTagOpen(false);
-                            }}
-                            className="bg-neutral-950 border border-neutral-800 hover:border-neutral-700 px-3 py-2 rounded-lg text-xs font-bold text-neutral-200 transition-all flex items-center gap-1.5"
-                        >
-                            <span>👤 Assign to Agent</span>
-                            <span className="text-[9px] text-neutral-500 font-mono">{activeAssignOpen ? '▲' : '▼'}</span>
-                        </button>
-                        {activeAssignOpen && (
-                            <div className="absolute right-0 top-full mt-1.5 w-48 bg-neutral-950 border border-neutral-800 rounded-lg shadow-2xl z-50 p-1 space-y-1">
-                                <span className="block text-[9px] text-neutral-500 uppercase tracking-wider px-2 py-1 font-black">Choose Agent</span>
-                                {agents.map(agent => (
-                                    <button
-                                        key={agent.id}
-                                        type="button"
-                                        onClick={() => {
-                                            handleBulkAssignAgent(agent.id);
-                                            setActiveAssignOpen(false);
-                                        }}
-                                        className="w-full text-left px-2 py-1.5 text-xs text-neutral-300 hover:bg-neutral-800 rounded transition-all"
-                                    >
-                                        {agent.name}
-                                    </button>
-                                ))}
-                                <div className="border-t border-neutral-800/80 my-1"></div>
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        handleBulkAssignAgent(null);
-                                        setActiveAssignOpen(false);
-                                    }}
-                                    className="w-full text-left px-2 py-1.5 text-xs text-red-400 hover:bg-neutral-800 rounded transition-all"
-                                >
-                                    Unassign Agent
-                                </button>
-                            </div>
-                        )}
-                    </div>
-
-                    {/* Bulk Tag addition dropdown */}
-                    <div className="relative">
-                        <button
-                            type="button"
-                            onClick={() => {
-                                setActiveTagOpen(!activeTagOpen);
-                                setActiveMoveOpen(false);
-                                setActiveAssignOpen(false);
-                            }}
-                            className="bg-neutral-950 border border-neutral-800 hover:border-neutral-700 px-3 py-2 rounded-lg text-xs font-bold text-neutral-200 transition-all flex items-center gap-1.5"
-                        >
-                            <span>🏷️ Tag Selected</span>
-                            <span className="text-[9px] text-neutral-500 font-mono">{activeTagOpen ? '▲' : '▼'}</span>
-                        </button>
-                        {activeTagOpen && (
-                            <div className="absolute right-0 top-full mt-1.5 w-64 bg-neutral-950 border border-neutral-800 rounded-lg shadow-2xl z-50 p-3 space-y-2">
-                                <span className="block text-[9px] text-neutral-500 uppercase tracking-wider font-black">Add Tags to Selected</span>
-                                <input
-                                    type="text"
-                                    value={bulkTagInput}
-                                    onChange={(e) => setBulkTagInput(e.target.value)}
-                                    placeholder="Enter tags (comma separated)..."
-                                    className="w-full bg-black border border-neutral-800 p-2 rounded text-xs text-neutral-200 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
-                                    onKeyDown={(e) => {
-                                        if (e.key === 'Enter') {
-                                            handleBulkTag(bulkTagInput);
-                                            setActiveTagOpen(false);
-                                        }
-                                    }}
-                                />
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        handleBulkTag(bulkTagInput);
-                                        setActiveTagOpen(false);
-                                    }}
-                                    className="w-full py-1 bg-blue-600 text-white text-xs font-bold rounded hover:bg-blue-500 transition-all"
-                                >
-                                    Apply Tags
-                                </button>
-                            </div>
-                        )}
-                    </div>
-
-                    {/* Bulk Folder move dropdown */}
-                    <div className="relative">
-                        <button
-                            type="button"
-                            onClick={() => {
-                                setActiveMoveOpen(!activeMoveOpen);
-                                setActiveAssignOpen(false);
-                                setActiveTagOpen(false);
-                            }}
-                            className="bg-neutral-950 border border-neutral-800 hover:border-neutral-700 px-3 py-2 rounded-lg text-xs font-bold text-neutral-200 transition-all flex items-center gap-1.5"
-                        >
-                            <span>📂 Move to Folder</span>
-                            <span className="text-[9px] text-neutral-500 font-mono">{activeMoveOpen ? '▲' : '▼'}</span>
-                        </button>
-                        {activeMoveOpen && (
-                            <div className="absolute right-0 top-full mt-1.5 w-56 bg-neutral-950 border border-neutral-800 rounded-lg shadow-2xl z-50 p-3 space-y-2">
-                                <span className="block text-[9px] text-neutral-500 uppercase tracking-wider font-black">Choose Folder</span>
-                                <div className="max-h-32 overflow-y-auto space-y-1 custom-scrollbar">
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            handleBulkMoveToFolder(null);
-                                            setActiveMoveOpen(false);
-                                        }}
-                                        className="w-full text-left px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800 rounded transition-all"
-                                    >
-                                        Remove from Folder (Unassigned)
-                                    </button>
-                                    {folderList.map(fol => (
+                {selectedIds.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-2 w-full md:w-auto justify-end">
+                        {/* Bulk Agent assign dropdown */}
+                        <div className="relative">
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setActiveAssignOpen(!activeAssignOpen);
+                                    setActiveMoveOpen(false);
+                                    setActiveTagOpen(false);
+                                    setActiveLoreOpen(false);
+                                }}
+                                className="bg-neutral-950 border border-neutral-800 hover:border-neutral-700 px-3 py-2 rounded-lg text-xs font-bold text-neutral-200 transition-all flex items-center gap-1.5"
+                            >
+                                <span>👤 Associate Character</span>
+                                <span className="text-[9px] text-neutral-500 font-mono">{activeAssignOpen ? '▲' : '▼'}</span>
+                            </button>
+                            {activeAssignOpen && (
+                                <div className="absolute right-0 top-full mt-1.5 w-48 bg-neutral-950 border border-neutral-800 rounded-lg shadow-2xl z-50 p-1 space-y-1">
+                                    <span className="block text-[9px] text-neutral-500 uppercase tracking-wider px-2 py-1 font-black">Choose Character Profile</span>
+                                    {agents.map(agent => (
                                         <button
-                                            key={fol}
+                                            key={agent.id}
                                             type="button"
                                             onClick={() => {
-                                                handleBulkMoveToFolder(fol);
-                                                setActiveMoveOpen(false);
+                                                handleBulkAssignAgent(agent.id);
+                                                setActiveAssignOpen(false);
                                             }}
-                                            className="w-full text-left px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800 rounded transition-all truncate"
+                                            className="w-full text-left px-2 py-1.5 text-xs text-neutral-300 hover:bg-neutral-800 rounded transition-all"
                                         >
-                                            {fol}
+                                            {agent.name}
                                         </button>
                                     ))}
+                                    <div className="border-t border-neutral-800/80 my-1"></div>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            handleBulkAssignAgent(null);
+                                            setActiveAssignOpen(false);
+                                        }}
+                                        className="w-full text-left px-2 py-1.5 text-xs text-red-400 hover:bg-neutral-800 rounded transition-all"
+                                    >
+                                        Unassign Character
+                                    </button>
                                 </div>
-                                <div className="border-t border-neutral-800 pt-2 space-y-1.5">
-                                    <span className="block text-[9px] text-neutral-500 uppercase tracking-wider font-black font-sans">Or Create New Folder</span>
+                            )}
+                        </div>
+
+                        {/* Bulk Lore association dropdown */}
+                        <div className="relative">
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setActiveLoreOpen(!activeLoreOpen);
+                                    setActiveMoveOpen(false);
+                                    setActiveAssignOpen(false);
+                                    setActiveTagOpen(false);
+                                }}
+                                className="bg-neutral-950 border border-neutral-800 hover:border-neutral-700 px-3 py-2 rounded-lg text-xs font-bold text-neutral-200 transition-all flex items-center gap-1.5"
+                            >
+                                <span>📖 Link to Lore</span>
+                                <span className="text-[9px] text-neutral-500 font-mono">{activeLoreOpen ? '▲' : '▼'}</span>
+                            </button>
+                            {activeLoreOpen && (
+                                <div className="absolute right-0 top-full mt-1.5 w-56 bg-neutral-950 border border-neutral-800 rounded-lg shadow-2xl z-50 p-1 space-y-1">
+                                    <span className="block text-[9px] text-neutral-500 uppercase tracking-wider px-2 py-1 font-black">Associate Lore Theme</span>
+                                    <div className="max-h-48 overflow-y-auto custom-scrollbar">
+                                        {lore.length === 0 ? (
+                                            <div className="p-3 text-[10px] text-neutral-500 italic">No lore entries defined.</div>
+                                        ) : (
+                                            lore.map(entry => (
+                                                <button
+                                                    key={entry.id}
+                                                    type="button"
+                                                    onClick={() => {
+                                                        handleBulkTag(entry.title);
+                                                        setActiveLoreOpen(false);
+                                                    }}
+                                                    className="w-full text-left px-2 py-1.5 text-xs text-neutral-300 hover:bg-neutral-800 rounded transition-all truncate"
+                                                    title={entry.title}
+                                                >
+                                                    {entry.title}
+                                                </button>
+                                            ))
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Bulk Tag addition dropdown */}
+                        <div className="relative">
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setActiveTagOpen(!activeTagOpen);
+                                    setActiveMoveOpen(false);
+                                    setActiveAssignOpen(false);
+                                    setActiveLoreOpen(false);
+                                }}
+                                className="bg-neutral-950 border border-neutral-800 hover:border-neutral-700 px-3 py-2 rounded-lg text-xs font-bold text-neutral-200 transition-all flex items-center gap-1.5"
+                            >
+                                <span>🏷️ Tag Selected</span>
+                                <span className="text-[9px] text-neutral-500 font-mono">{activeTagOpen ? '▲' : '▼'}</span>
+                            </button>
+                            {activeTagOpen && (
+                                <div className="absolute right-0 top-full mt-1.5 w-64 bg-neutral-950 border border-neutral-800 rounded-lg shadow-2xl z-50 p-3 space-y-2">
+                                    <span className="block text-[9px] text-neutral-500 uppercase tracking-wider font-black">Add Tags to Selected</span>
                                     <input
                                         type="text"
-                                        value={newFolderName}
-                                        onChange={(e) => setNewFolderName(e.target.value)}
-                                        placeholder="New folder name..."
-                                        className="w-full bg-black border border-neutral-800 p-1.5 rounded text-xs text-neutral-200 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
+                                        value={bulkTagInput}
+                                        onChange={(e) => setBulkTagInput(e.target.value)}
+                                        placeholder="Enter tags (comma separated)..."
+                                        className="w-full bg-black border border-neutral-800 p-2 rounded text-xs text-neutral-200 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
                                         onKeyDown={(e) => {
-                                            if (e.key === 'Enter' && newFolderName.trim()) {
-                                                handleBulkMoveToFolder(newFolderName.trim());
-                                                setActiveMoveOpen(false);
+                                            if (e.key === 'Enter') {
+                                                handleBulkTag(bulkTagInput);
+                                                setActiveTagOpen(false);
                                             }
                                         }}
                                     />
                                     <button
                                         type="button"
                                         onClick={() => {
-                                            if (newFolderName.trim()) {
-                                                handleBulkMoveToFolder(newFolderName.trim());
-                                                setActiveMoveOpen(false);
-                                            }
+                                            handleBulkTag(bulkTagInput);
+                                            setActiveTagOpen(false);
                                         }}
                                         className="w-full py-1 bg-blue-600 text-white text-xs font-bold rounded hover:bg-blue-500 transition-all"
                                     >
-                                        Create & Move
+                                        Apply Tags
                                     </button>
                                 </div>
-                            </div>
-                        )}
+                            )}
+                        </div>
+
+                        {/* Bulk Folder move dropdown */}
+                        <div className="relative">
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setActiveMoveOpen(!activeMoveOpen);
+                                    setActiveAssignOpen(false);
+                                    setActiveTagOpen(false);
+                                    setActiveLoreOpen(false);
+                                }}
+                                className="bg-neutral-950 border border-neutral-800 hover:border-neutral-700 px-3 py-2 rounded-lg text-xs font-bold text-neutral-200 transition-all flex items-center gap-1.5"
+                            >
+                                <span>📂 Move to Folder</span>
+                                <span className="text-[9px] text-neutral-500 font-mono">{activeMoveOpen ? '▲' : '▼'}</span>
+                            </button>
+                            {activeMoveOpen && (
+                                <div className="absolute right-0 top-full mt-1.5 w-56 bg-neutral-950 border border-neutral-800 rounded-lg shadow-2xl z-50 p-3 space-y-2">
+                                    <span className="block text-[9px] text-neutral-500 uppercase tracking-wider font-black">Choose Folder</span>
+                                    <div className="max-h-32 overflow-y-auto space-y-1 custom-scrollbar">
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                handleBulkMoveToFolder(null);
+                                                setActiveMoveOpen(false);
+                                            }}
+                                            className="w-full text-left px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800 rounded transition-all"
+                                        >
+                                            Remove from Folder (Unassigned)
+                                        </button>
+                                        {folderList.map(fol => (
+                                            <button
+                                                key={fol}
+                                                type="button"
+                                                onClick={() => {
+                                                    handleBulkMoveToFolder(fol);
+                                                    setActiveMoveOpen(false);
+                                                }}
+                                                className="w-full text-left px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800 rounded transition-all truncate"
+                                            >
+                                                {fol}
+                                            </button>
+                                        ))}
+                                    </div>
+                                    <div className="border-t border-neutral-800 pt-2 space-y-1.5">
+                                        <span className="block text-[9px] text-neutral-500 uppercase tracking-wider font-black font-sans">Or Create New Folder</span>
+                                        <input
+                                            type="text"
+                                            value={newFolderName}
+                                            onChange={(e) => setNewFolderName(e.target.value)}
+                                            placeholder="New folder name..."
+                                            className="w-full bg-black border border-neutral-800 p-1.5 rounded text-xs text-neutral-200 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
+                                            onKeyDown={(e) => {
+                                                if (e.key === 'Enter' && newFolderName.trim()) {
+                                                    handleBulkMoveToFolder(newFolderName.trim());
+                                                    setActiveMoveOpen(false);
+                                                }
+                                            }}
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                if (newFolderName.trim()) {
+                                                    handleBulkMoveToFolder(newFolderName.trim());
+                                                    setActiveMoveOpen(false);
+                                                }
+                                            }}
+                                            className="w-full py-1 bg-blue-600 text-white text-xs font-bold rounded hover:bg-blue-500 transition-all"
+                                        >
+                                            Create & Move
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Bulk Auto-Tag Selected using Gemini */}
+                        <button
+                            type="button"
+                            onClick={handleAutoTagBulk}
+                            disabled={taggingIds.length > 0}
+                            className="bg-purple-950/20 hover:bg-purple-950/60 border border-purple-500/30 hover:border-purple-500/80 px-3 py-2 rounded-lg text-xs font-bold text-purple-300 transition-all flex items-center gap-1.5 disabled:opacity-50"
+                            title="Analyze all selected images and videos using Gemini AI to auto-generate descriptive tags"
+                        >
+                            <span>🔮 AI Auto-Tag Selected</span>
+                        </button>
+
+                        {/* Bulk delete selected assets permanently */}
+                        <button
+                            type="button"
+                            onClick={() => {
+                                if (confirm(`Are you sure you want to delete these ${selectedIds.length} assets permanently from your project vault?`)) {
+                                    const updated = images.filter(img => !selectedIds.includes(img.id));
+                                    onUpdateImages(updated);
+                                    setSelectedIds([]);
+                                }
+                            }}
+                            className="bg-red-950/20 hover:bg-red-950 border border-red-500/20 hover:border-red-500 px-3 py-2 rounded-lg text-xs font-bold text-red-400 transition-all flex items-center gap-1.5"
+                            title="Delete selected assets permanently"
+                        >
+                            <span>🗑️ Delete Selected</span>
+                        </button>
                     </div>
-
-                    {/* Bulk Auto-Tag Selected using Gemini */}
-                    <button
-                        type="button"
-                        onClick={handleAutoTagBulk}
-                        disabled={taggingIds.length > 0}
-                        className="bg-purple-950/20 hover:bg-purple-950/60 border border-purple-500/30 hover:border-purple-500/80 px-3 py-2 rounded-lg text-xs font-bold text-purple-300 transition-all flex items-center gap-1.5 disabled:opacity-50"
-                        title="Analyze all selected images and videos using Gemini AI to auto-generate descriptive tags"
-                    >
-                        <span>🔮 AI Auto-Tag Selected</span>
-                    </button>
-
-                    {/* Bulk delete selected assets permanently */}
-                    <button
-                        type="button"
-                        onClick={() => {
-                            if (confirm(`Are you sure you want to delete these ${selectedIds.length} assets permanently from your project vault?`)) {
-                                const updated = images.filter(img => !selectedIds.includes(img.id));
-                                onUpdateImages(updated);
-                                setSelectedIds([]);
-                            }
-                        }}
-                        className="bg-red-950/20 hover:bg-red-950 border border-red-500/20 hover:border-red-500 px-3 py-2 rounded-lg text-xs font-bold text-red-400 transition-all flex items-center gap-1.5"
-                        title="Delete selected assets permanently"
-                    >
-                        <span>🗑️ Delete Selected</span>
-                    </button>
-                </div>
+                )}
             </div>
         )}
 
@@ -737,6 +1017,21 @@ export const ImageGrid: React.FC<ImageGridProps> = ({ images, isLoading, error, 
                              </svg>
                              Upload Image
                          </button>
+                         <button
+                            onClick={() => {
+                                const next = !isSelectionMode;
+                                setIsSelectionMode(next);
+                                if (!next) setSelectedIds([]);
+                            }}
+                            className={`px-4 py-2 rounded-lg flex items-center gap-2 transition-all font-medium text-sm whitespace-nowrap shadow-sm border ${
+                                isSelectionMode 
+                                    ? 'bg-blue-600 text-white border-blue-500 shadow-[0_0_15px_rgba(37,99,235,0.3)]' 
+                                    : 'bg-neutral-800 text-neutral-300 border-neutral-700 hover:bg-neutral-700 hover:border-neutral-600'
+                            }`}
+                            title="Toggle multi-selection mode for batch operations"
+                        >
+                            <span>{isSelectionMode ? '✓ Selection Mode Active' : '📋 Bulk Select'}</span>
+                        </button>
                      </>
                  )}
             </div>
@@ -770,6 +1065,15 @@ export const ImageGrid: React.FC<ImageGridProps> = ({ images, isLoading, error, 
                 return (
                     <div 
                         key={image.id} 
+                        draggable={true}
+                        onDragStart={(e) => {
+                            e.dataTransfer.setData('imageId', image.id);
+                            if (selectedIds.includes(image.id) && selectedIds.length > 1) {
+                                e.dataTransfer.setData('isBulk', 'true');
+                            } else {
+                                e.dataTransfer.setData('isBulk', 'false');
+                            }
+                        }}
                         className={`relative bg-neutral-800 rounded-lg overflow-hidden group transition-all duration-300 hover:scale-105 shadow-lg cursor-pointer ring-2 ${
                             isSelected ? 'ring-blue-500' : 'ring-transparent hover:ring-blue-500/50'
                         }`}
@@ -781,8 +1085,10 @@ export const ImageGrid: React.FC<ImageGridProps> = ({ images, isLoading, error, 
                                 onClick={(e) => toggleSelectItem(image.id, e)}
                                 className={`absolute top-2.5 left-2.5 w-5 h-5 rounded-md flex items-center justify-center transition-all border border-neutral-500 z-30 ${
                                     isSelected 
-                                        ? 'bg-blue-600 border-blue-500 opacity-100' 
-                                        : 'bg-black/40 hover:bg-black/60 border-neutral-400 opacity-0 group-hover:opacity-100'
+                                        ? 'bg-blue-600 border-blue-500 opacity-100 shadow-[0_0_10px_rgba(37,99,235,0.4)]' 
+                                        : isSelectionMode
+                                            ? 'bg-black/60 border-neutral-400 opacity-100 ring-1 ring-white/20'
+                                            : 'bg-black/40 hover:bg-black/60 border-neutral-400 opacity-0 group-hover:opacity-100'
                                 }`}
                             >
                                 {isSelected && (
@@ -951,6 +1257,82 @@ export const ImageGrid: React.FC<ImageGridProps> = ({ images, isLoading, error, 
                         ? `No assets matched search filter "${agentFilter}" in this view.` 
                         : "No assets have been stored inside this folder yet."}
                 </p>
+            </div>
+        )}
+        </div>
+        
+        {isTagManagementModalOpen && (
+            <div className="fixed inset-0 bg-black/90 backdrop-blur-sm z-[100] flex items-center justify-center p-6">
+                <div className="bg-neutral-900 border border-neutral-800 w-full max-w-2xl max-h-[80vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-fade-in">
+                    <div className="p-6 border-b border-neutral-800 flex justify-between items-center bg-black/20">
+                        <div>
+                            <h3 className="text-xl font-black text-white tracking-tight uppercase">Tag Management Hub</h3>
+                            <p className="text-xs text-neutral-500 font-medium">Rename or delete tags across all project assets</p>
+                        </div>
+                        <button 
+                            onClick={() => setIsTagManagementModalOpen(false)}
+                            className="p-2 hover:bg-neutral-800 rounded-lg text-neutral-500 hover:text-white transition-all"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                        </button>
+                    </div>
+
+                    <div className="flex-grow overflow-y-auto p-6 space-y-4 custom-scrollbar">
+                        {allAvailableTags.length === 0 ? (
+                            <div className="text-center py-12 text-neutral-600 italic">No tags defined in the project yet.</div>
+                        ) : (
+                            <div className="grid grid-cols-1 gap-3">
+                                {allAvailableTags.map(tag => (
+                                    <div key={tag} className="flex items-center gap-3 p-3 bg-neutral-950 border border-neutral-800 rounded-xl group transition-all hover:border-neutral-700">
+                                        <div className="w-8 h-8 rounded-lg bg-indigo-900/30 flex items-center justify-center text-indigo-400 font-bold text-sm">
+                                            {tag.charAt(0).toUpperCase()}
+                                        </div>
+                                        <div className="flex-grow">
+                                            <div className="text-sm font-bold text-neutral-200">{tag}</div>
+                                            <div className="text-[10px] text-neutral-500 font-mono">
+                                                Used in {images.filter(img => img.tags?.includes(tag)).length} assets
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <button 
+                                                onClick={() => {
+                                                    const newName = prompt(`Rename tag "${tag}" to:`, tag);
+                                                    if (newName && newName.trim() && newName !== tag) {
+                                                        handleGlobalTagUpdate(tag, newName.trim());
+                                                    }
+                                                }}
+                                                className="px-3 py-1.5 bg-neutral-800 hover:bg-indigo-900/50 text-neutral-400 hover:text-indigo-300 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all"
+                                            >
+                                                Rename
+                                            </button>
+                                            <button 
+                                                onClick={() => {
+                                                    if (confirm(`Are you sure you want to delete tag "${tag}" from ALL assets? This cannot be undone.`)) {
+                                                        handleGlobalTagUpdate(tag, null);
+                                                    }
+                                                }}
+                                                className="px-3 py-1.5 bg-neutral-800 hover:bg-rose-950 text-neutral-400 hover:text-rose-400 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all"
+                                            >
+                                                Delete
+                                            </button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="p-6 bg-black/40 border-t border-neutral-800 flex justify-end">
+                        <button 
+                            onClick={() => setIsTagManagementModalOpen(false)}
+                            className="px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black uppercase tracking-widest rounded-xl transition-all shadow-lg shadow-indigo-900/20"
+                        >
+                            Done
+                        </button>
+                    </div>
+                </div>
             </div>
         )}
     </div>

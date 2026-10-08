@@ -20,6 +20,8 @@ import { AssetIntelligenceCleanupModal } from './AssetIntelligenceCleanupModal';
 import { LoreWiki } from './LoreWiki';
 import { BulkRenameModal } from './BulkRenameModal';
 import { LoreDensityHeatmap2D } from './LoreDensityHeatmap2D';
+import { NarrativeSentimentMap } from './NarrativeSentimentMap';
+import { analyzeAudioSentimentAndThemesService } from '../services/geminiService';
 
 // Firebase Firestore Imports
 import { db, auth } from '../services/firebase';
@@ -38,7 +40,7 @@ interface KnowledgeViewProps {
     onUpdateProjectImages?: (images: ImageState[]) => void;
 }
 
-type StudioTab = 'overview' | 'heatmap' | 'vectors' | 'graph' | 'forge' | 'subgraph' | 'refinement' | 'wiki';
+type StudioTab = 'overview' | 'heatmap' | 'sentiment' | 'vectors' | 'graph' | 'forge' | 'subgraph' | 'refinement' | 'wiki';
 
 export const KnowledgeView: React.FC<KnowledgeViewProps> = ({ 
     agents, 
@@ -235,6 +237,7 @@ export const KnowledgeView: React.FC<KnowledgeViewProps> = ({
     // Lore Hypothesis Generator & Thematic Cluster Bridge State
     const [loreHypotheses, setLoreHypotheses] = useState<LoreHypothesis[]>([]);
     const [isGeneratingHypotheses, setIsGeneratingHypotheses] = useState<boolean>(false);
+    const [isAnalyzingSentiment, setIsAnalyzingSentiment] = useState<boolean>(false);
     const [hypothesisFilter, setHypothesisFilter] = useState<'all' | 'suggested' | 'accepted'>('all');
     const [expandedHypothesisId, setExpandedHypothesisId] = useState<string | null>(null);
 
@@ -314,6 +317,23 @@ export const KnowledgeView: React.FC<KnowledgeViewProps> = ({
     const handleDismissHypothesis = (id: string) => {
         const updated = loreHypotheses.filter(h => h.id !== id);
         saveHypotheses(updated);
+    };
+
+    const handleAnalyzeSentiment = async () => {
+        if (!selectedAgentId) return;
+        setIsAnalyzingSentiment(true);
+        try {
+            // Use vectors as transcripts for now if they are text
+            const textChunks = vectors.filter(v => !v.metadata?.type || v.metadata.type === 'document').slice(0, 20);
+            const report = await analyzeAudioSentimentAndThemesService(textChunks, selectedAgent?.name || 'Project');
+            setAudioAnalysisCache(report);
+            localStorage.setItem(`mythos_audio_analysis_${selectedAgentId}`, JSON.stringify(report));
+            setStatusMessage("Narrative sentiment analysis complete.");
+        } catch (err) {
+            console.error("Sentiment analysis failed:", err);
+        } finally {
+            setIsAnalyzingSentiment(false);
+        }
     };
 
     const handlePreviewOrFilterDoc = (sourceName: string) => {
@@ -1547,6 +1567,7 @@ export const KnowledgeView: React.FC<KnowledgeViewProps> = ({
                     {[
                         { id: 'overview', label: 'Factory' },
                         { id: 'heatmap', label: '🔥 2D Density Heatmap' },
+                        { id: 'sentiment', label: '📊 Sentiment Map' },
                         { id: 'wiki', label: '📖 Lore Wiki' },
                         { id: 'subgraph', label: '⚠️ Contradiction Subgraph' },
                         { id: 'refinement', label: '✨ AI Refinement' },
@@ -1928,6 +1949,57 @@ export const KnowledgeView: React.FC<KnowledgeViewProps> = ({
                             tripletEdges={tripletEdges}
                             vectors={vectors}
                         />
+                    </div>
+                )}
+
+                {activeTab === 'sentiment' && (
+                    <div className="max-w-6xl mx-auto space-y-6">
+                        <div className="bg-neutral-900/80 border border-neutral-800 p-6 rounded-2xl backdrop-blur-md shadow-xl flex flex-wrap items-center justify-between gap-4">
+                            <div>
+                                <h2 className="text-lg font-black text-white flex items-center gap-2.5">
+                                    <span>📊</span>
+                                    <span>Narrative Sentiment Map (Tonal Pacing)</span>
+                                </h2>
+                                <p className="text-xs text-neutral-400 mt-1">
+                                    Tracks emotional shifts and tonal intensity across the screenplay using D3 heatmap visualization.
+                                </p>
+                            </div>
+                            <div className="flex gap-3">
+                                <button
+                                    onClick={handleAnalyzeSentiment}
+                                    disabled={isAnalyzingSentiment}
+                                    className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-all shadow-lg flex items-center gap-2"
+                                >
+                                    {isAnalyzingSentiment ? <LoadingSpinner /> : '✨ Analyze Screenplay'}
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setActiveTab('overview')}
+                                    className="px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 hover:text-white rounded-xl text-xs font-bold transition-all border border-neutral-700"
+                                >
+                                    ← Back to Factory
+                                </button>
+                            </div>
+                        </div>
+
+                        {audioAnalysisCache?.sentimentArc ? (
+                            <NarrativeSentimentMap 
+                                data={audioAnalysisCache.sentimentArc.map((s: any, i: number) => ({
+                                    segment: s.segment,
+                                    tone: s.tone,
+                                    score: s.tone.toLowerCase().includes('tense') || s.tone.toLowerCase().includes('desperate') ? -0.6 : (s.tone.toLowerCase().includes('joy') ? 0.7 : 0.1),
+                                    intensity: 0.8
+                                }))} 
+                            />
+                        ) : (
+                            <div className="bg-neutral-900/50 border border-neutral-800 border-dashed rounded-2xl p-12 text-center space-y-4">
+                                <div className="text-4xl">🎭</div>
+                                <h3 className="text-white font-bold">No Sentiment Data Found</h3>
+                                <p className="text-neutral-500 text-xs max-w-md mx-auto">
+                                    Click 'Analyze Screenplay' above to use Gemini to parse your lore and documents for emotional arcs and tonal shifts.
+                                </p>
+                            </div>
+                        )}
                     </div>
                 )}
                 
