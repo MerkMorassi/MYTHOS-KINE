@@ -42,8 +42,10 @@ export const simpleMarkdownToHtml = (markdown: string): string => {
 /**
  * Normalizes screenplay text to raw Fountain format at the scripts-bin / breakdown seam:
  * - Strips any space padding from lines
- * - Removes a trailing colon from uppercase character cue lines (length <= 38)
- * - Preserves scene slugs, character names, parentheticals, and dialogue
+ * - Removes a single trailing colon from uppercase character cue lines where the base name <= 38 chars
+ * - Leaves double colons '::' alone
+ * - Never strips scene slugs (INT., EXT., EST., etc.) or parentheticals
+ * - Preserves dialogue, action, and transitions
  */
 export const normalizeToFountain = (text: string): string => {
     if (!text) return '';
@@ -51,11 +53,30 @@ export const normalizeToFountain = (text: string): string => {
     return clean.split('\n').map(line => {
         const trimmed = line.trim();
         if (!trimmed) return '';
-        // If line is ALL-CAPS with trailing colon and <= 38 chars, strip colon (e.g. "ORIN:" -> "ORIN")
-        if (trimmed.length <= 38 && trimmed.endsWith(':')) {
-            const withoutColon = trimmed.slice(0, -1).trim();
-            if (withoutColon === withoutColon.toUpperCase() && /[A-Z]/.test(withoutColon)) {
-                return withoutColon;
+
+        // Never touch scene headings
+        if (/^(INT\.|EXT\.|EST\.|INT\/EXT\.|I\/E\b)/i.test(trimmed.replace(/^\.\s*/, ""))) {
+            return trimmed;
+        }
+
+        // Never touch parentheticals
+        if (/^\(.*\)$/.test(trimmed)) {
+            return trimmed;
+        }
+
+        // Check for character cue with trailing colon:
+        // Must end with a single colon (not '::')
+        if (trimmed.endsWith(':') && !trimmed.endsWith('::')) {
+            const base = trimmed.slice(0, -1).trim();
+            // Check base length <= 38, uppercase, contains letter, not scene or transition
+            if (base.length > 0 && base.length <= 38) {
+                const cleanBase = base.replace(/^@/, '');
+                if (cleanBase === cleanBase.toUpperCase() && /[A-Z]/.test(cleanBase)) {
+                    // Make sure it's not a transition like "CUT TO:"
+                    if (!/^(FADE IN|FADE OUT|CUT TO|SMASH CUT TO|DISSOLVE TO|MATCH CUT TO|JUMP CUT TO)$/i.test(cleanBase) && !/TO$/i.test(cleanBase)) {
+                        return base;
+                    }
+                }
             }
         }
         return trimmed;

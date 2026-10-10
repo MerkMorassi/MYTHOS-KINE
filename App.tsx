@@ -57,6 +57,7 @@ import { ImageModal } from './components/ImageModal.tsx';
 import { LiveStudio } from './components/LiveStudio.tsx';
 import { TranscriptionStudio } from './components/TranscriptionStudio.tsx';
 import { normalizeToFountain } from './utils/textFormatting';
+import { themeConfig } from './themeConfig';
 import { Agent, Project, ActiveView, ImageState, VoiceCommandLogEntry } from './types';
 import { getHfApiKey, getTopazApiKey, saveHfApiKey, saveTopazApiKey, getVoiceLabUrl, saveVoiceLabUrl, getDolphinUrl, saveDolphinUrl, getCinematicCoreUrl, saveCinematicCoreUrl, getCameraDollyUrl, saveCameraDollyUrl } from './services/apiKeyService';
 import { getAnimAgentsTeam } from './services/agentService';
@@ -1110,7 +1111,7 @@ export const App = () => {
 
     if (authLoading) {
         return (
-            <div className="flex h-screen w-screen bg-neutral-950 items-center justify-center">
+            <div className={themeConfig.layout.loadingScreen}>
                 <div className="text-center">
                     <LoadingSpinner className="w-10 h-10 text-blue-600 mx-auto" />
                     <p className="text-xs font-bold text-neutral-500 uppercase tracking-widest mt-4 animate-pulse">Initializing Neural Workspace...</p>
@@ -1121,27 +1122,27 @@ export const App = () => {
 
     if (!user) {
         return (
-            <div className="flex h-screen w-screen bg-neutral-950 text-white relative overflow-hidden items-center justify-center font-sans">
+            <div className={themeConfig.layout.loginScreen}>
                 {/* Visual Ambient Background Mesh */}
                 <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(37,99,235,0.06)_0%,transparent_60%)] pointer-events-none" />
                 <div className="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(0,0,0,0.5),rgba(0,0,0,0.9))] pointer-events-none" />
                 
-                <div className="max-w-md w-full bg-neutral-900 border border-neutral-800 p-8 rounded-2xl shadow-2xl relative z-10 flex flex-col items-center">
+                <div className={themeConfig.layout.loginCard}>
                     {/* Brand lockup */}
                     <div className="w-12 h-12 bg-blue-600 rounded-xl flex items-center justify-center text-white font-black text-lg shadow-lg shadow-blue-900/50 mb-6">M</div>
-                    <h1 className="text-xl font-black tracking-tight text-white uppercase text-center leading-none">MythOS Studio Pro</h1>
+                    <h1 className={themeConfig.typography.studioTitle + " text-center leading-none"}>MythOS Studio Pro</h1>
                     <p className="text-[10px] text-blue-400 font-bold uppercase tracking-widest mt-2">Production Operating System</p>
                     
                     <div className="w-full border-b border-neutral-800 my-6" />
 
-                    <p className="text-xs text-neutral-400 text-center leading-relaxed mb-6">
+                    <p className={themeConfig.typography.bodyMuted + " text-center mb-6"}>
                         Welcome to MythOS Studio Pro. Sign in using your Google account to access your visual director, scriptwriter suite, neural video synthesizers, and lorepacks.
                     </p>
 
                     {/* Google Login button */}
                     <button
                         onClick={handleGoogleSignIn}
-                        className="w-full flex items-center justify-center gap-3 bg-white hover:bg-neutral-100 text-neutral-900 font-bold text-xs py-3.5 px-4 rounded-xl transition-all shadow-lg hover:shadow-xl shrink-0"
+                        className={themeConfig.buttons.google}
                     >
                         <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
                             <path
@@ -1173,9 +1174,9 @@ export const App = () => {
     }
 
     return (
-        <div className="flex h-screen bg-primary text-text-primary overflow-hidden font-sans">
+        <div className={themeConfig.layout.appContainer}>
             <Sidebar activeView={activeView} onNavigate={handleNavigate} user={user} onSignOut={handleSignOut} />
-            <div className="flex-grow flex flex-col min-w-0 bg-secondary/20 h-screen overflow-hidden">
+            <div className={themeConfig.layout.mainContent}>
                 <StudioHeader 
                     breadcrumbs={headerConfig.breadcrumbs}
                     agent={headerConfig.agent}
@@ -1190,7 +1191,7 @@ export const App = () => {
                     projectAgents={project.data.agents}
                     onNavigate={handleNavigate}
                 />
-                <div className="flex-1 overflow-y-auto min-h-0">
+                <div className={themeConfig.layout.scrollableArea}>
                     {renderContent()}
                 </div>
             </div>
@@ -1230,7 +1231,7 @@ export const App = () => {
             <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-3 pointer-events-none">
                 {/* Status banner */}
                 {voiceAssistantActive && (
-                    <div className="p-3 bg-neutral-900/95 border border-purple-500/30 text-neutral-200 text-xs font-black uppercase rounded-xl tracking-wider shadow-2xl flex items-center gap-2 animate-bounce pointer-events-auto backdrop-blur-md">
+                    <div className={themeConfig.overlays.voiceBanner}>
                         <span className="w-2.5 h-2.5 rounded-full bg-purple-500 animate-ping inline-block" />
                         <span>Hands-Free Active</span>
                     </div>
@@ -1239,11 +1240,7 @@ export const App = () => {
                 {/* Floating button */}
                 <button
                     onClick={() => setVoiceAssistantActive(!voiceAssistantActive)}
-                    className={`p-4 rounded-full shadow-2xl transition-all duration-300 transform hover:scale-110 pointer-events-auto border flex items-center justify-center ${
-                        voiceAssistantActive 
-                            ? 'bg-purple-600 hover:bg-purple-500 text-white border-purple-400/40 ring-4 ring-purple-500/20' 
-                            : 'bg-neutral-900 hover:bg-neutral-800 text-neutral-400 border-neutral-700/60'
-                    }`}
+                    className={voiceAssistantActive ? themeConfig.overlays.voiceFloatingButtonActive : themeConfig.overlays.voiceFloatingButtonInactive}
                     title={voiceAssistantActive ? "Deactivate Voice Commands (Hands-Free)" : "Activate Voice Commands (Hands-Free)"}
                 >
                     <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1254,7 +1251,7 @@ export const App = () => {
 
             {/* Flash command confirmation popup */}
             {flashVoiceCommand && (
-                <div className="fixed top-6 left-1/2 -translate-x-1/2 z-50 bg-gradient-to-r from-purple-600 to-indigo-600 text-white text-xs font-black uppercase p-3.5 px-6 rounded-xl shadow-2xl border border-purple-400/30 tracking-widest flex items-center gap-2 animate-pulse">
+                <div className={themeConfig.overlays.flashBanner}>
                     <span>🔮 Voice Triggered:</span>
                     <span className="text-yellow-300 font-mono">"{lastSpokenCommand}"</span>
                 </div>
@@ -1262,7 +1259,7 @@ export const App = () => {
 
             {/* Active Hands-Free Recording Indicator */}
             {isVoiceRecording && (
-                <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 bg-rose-950/90 border border-rose-500 text-rose-200 text-xs font-black uppercase p-3 px-5 rounded-full shadow-2xl flex items-center gap-2.5 animate-pulse backdrop-blur-md">
+                <div className={themeConfig.overlays.voiceRecordingBanner}>
                     <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping inline-block" />
                     <span>Hands-Free Recording:</span>
                     <span className="font-mono text-white bg-rose-900/60 px-2 py-0.5 rounded text-[10px]">
@@ -1274,7 +1271,7 @@ export const App = () => {
 
             {/* REAL-TIME KNOWLEDGE DELTA CONTRADICTION TOAST */}
             {activeToastDiscrepancy && (
-                <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[100] w-full max-w-md bg-gradient-to-r from-red-950 via-black to-red-950 border border-red-500 rounded-2xl p-4 shadow-[0_0_25px_rgba(239,68,68,0.4)] flex flex-col gap-2.5 backdrop-blur-md animate-slide-in-down">
+                <div className={themeConfig.overlays.collisionToast}>
                     <style>{`
                         @keyframes slideInDown {
                             from { transform: translate(-50%, -150%); opacity: 0; }

@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { DynamicPromptList } from '../types.ts';
 import { ShuffleIcon } from './icons.tsx';
 import { Dataframe } from './Dataframe.tsx';
+import { themeConfig } from '../themeConfig.ts';
 
 interface DynamicPromptsStudioProps {
     lists: DynamicPromptList[];
@@ -157,10 +158,10 @@ export const DynamicPromptsStudio: React.FC<DynamicPromptsStudioProps> = ({ list
     const [editingId, setEditingId] = useState<string | null>(null);
 
     return (
-        <div className="p-6 max-w-7xl mx-auto w-full space-y-8 h-full overflow-y-auto">
+        <div className={themeConfig.layout.studioContainer}>
             <div className="mb-8">
-                <h2 className="text-3xl font-bold text-neutral-200 mb-2">Dynamic Prompts</h2>
-                <p className="text-neutral-400 mb-6">Create lists of variables (like [character], [location]) to inject randomness into your prompts.</p>
+                <h2 className={themeConfig.typography.pageTitle}>Dynamic Prompts</h2>
+                <p className={themeConfig.typography.pageSubtitle + " mb-6"}>Create lists of variables (like [character], [location]) to inject randomness into your prompts.</p>
                 
                 <CreateListForm onCreate={onCreate} />
             </div>
@@ -178,14 +179,14 @@ export const DynamicPromptsStudio: React.FC<DynamicPromptsStudioProps> = ({ list
                                         onCancel={() => setEditingId(null)}
                                     />
                                 ) : (
-                                    <div className="bg-neutral-800/50 p-4 border border-neutral-700 group hover:border-neutral-600 transition-all rounded-lg">
+                                    <div className={themeConfig.cards.base}>
                                         <div className="flex justify-between items-start mb-2">
                                             <h4 className="text-lg font-bold text-neutral-200 flex items-center gap-2">
                                                 [{list.name}]
                                             </h4>
                                             <button 
                                                 onClick={() => setEditingId(list.id)} 
-                                                className="text-sm text-neutral-400 hover:text-white opacity-0 group-hover:opacity-100 transition-opacity"
+                                                className="text-sm text-neutral-400 hover:text-white opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
                                             >
                                                 Edit
                                             </button>
@@ -205,7 +206,7 @@ export const DynamicPromptsStudio: React.FC<DynamicPromptsStudioProps> = ({ list
                     <div className="flex flex-col items-center justify-center h-[50vh] border-2 border-dashed border-neutral-800 rounded-xl bg-neutral-900/30 text-center p-8">
                         <div className="w-16 h-16 text-neutral-700 mb-4"><ShuffleIcon /></div>
                         <h3 className="text-xl font-semibold text-neutral-300 mb-2">No Lists Created</h3>
-                        <p className="text-neutral-500">Create a list to start using dynamic variables in your prompts.</p>
+                        <p className={themeConfig.typography.bodyMuted}>Create a list to start using dynamic variables in your prompts.</p>
                     </div>
                 )}
             </div>

@@ -7,6 +7,7 @@ import { ScriptIcon, ChatIcon, LibraryIcon, DownloadIcon, CloseIcon } from './ic
 import { TrashIcon } from './icons/TrashIcon';
 import { ScriptViewer } from './ScriptViewer.tsx';
 import { BreakdownViewModal } from './BreakdownViewModal.tsx';
+import { themeConfig } from '../themeConfig.ts';
 
 interface ScriptingStudioProps {
     agent: Agent;
@@ -38,28 +39,22 @@ export const ScriptingStudio: React.FC<ScriptingStudioProps> = ({
 
     return (
         <div className="flex flex-col h-full w-full bg-primary">
-            <div className="flex items-center px-6 pt-2 bg-neutral-900 border-b border-neutral-800 gap-1 z-10">
+            <div className={themeConfig.tabs.bar}>
                 <button
                     onClick={() => setActiveTab('chat')}
-                    className={`flex items-center gap-2 px-6 py-3 text-sm font-bold border-b-2 transition-colors ${
-                        activeTab === 'chat' ? 'border-emerald-500 text-white' : 'border-transparent text-neutral-500 hover:text-neutral-300'
-                    }`}
+                    className={activeTab === 'chat' ? themeConfig.tabs.tabActive : themeConfig.tabs.tabInactive}
                 >
                     <ChatIcon className="w-4 h-4" /> Scribe Chat
                 </button>
                 <button
                     onClick={() => setActiveTab('viewer')}
-                    className={`flex items-center gap-2 px-6 py-3 text-sm font-bold border-b-2 transition-colors ${
-                        activeTab === 'viewer' ? 'border-emerald-500 text-white' : 'border-transparent text-neutral-500 hover:text-neutral-300'
-                    }`}
+                    className={activeTab === 'viewer' ? themeConfig.tabs.tabActive : themeConfig.tabs.tabInactive}
                 >
                     <ScriptIcon className="w-4 h-4" /> Script Viewer
                 </button>
                 <button
                     onClick={() => setActiveTab('bin')}
-                    className={`flex items-center gap-2 px-6 py-3 text-sm font-bold border-b-2 transition-colors ${
-                        activeTab === 'bin' ? 'border-emerald-500 text-white' : 'border-transparent text-neutral-500 hover:text-neutral-300'
-                    }`}
+                    className={activeTab === 'bin' ? themeConfig.tabs.tabActive : themeConfig.tabs.tabInactive}
                 >
                     <LibraryIcon className="w-4 h-4" /> Scripts Bin
                 </button>
@@ -69,7 +64,7 @@ export const ScriptingStudio: React.FC<ScriptingStudioProps> = ({
                 {activeTab === 'chat' && (
                     <div className="flex flex-col h-full">
                         <div className="p-6 pb-0 max-w-6xl mx-auto w-full">
-                            <h1 className="text-2xl font-black text-white mb-4">Scribe's Workspace</h1>
+                            <h1 className={themeConfig.typography.pageTitle}>Scribe's Workspace</h1>
                             <div className="bg-emerald-900/20 border border-emerald-500/20 p-4 rounded-xl mb-6 text-sm text-emerald-200">
                                 <strong>Status:</strong> Ready for dictation or structural analysis.
                             </div>

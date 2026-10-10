@@ -19,6 +19,7 @@ import { Lore3DUniverseGraph } from './Lore3DUniverseGraph.tsx';
 import { LoreQuerySearchBar } from './LoreQuerySearchBar.tsx';
 import { KnowledgeInsightsPanel } from './KnowledgeInsightsPanel.tsx';
 import { CharacterArcTimeline } from './CharacterArcTimeline.tsx';
+import { themeConfig } from '../themeConfig.ts';
 
 interface ProjectSummary {
     id: string;
@@ -522,12 +523,12 @@ export const LoreStudio: React.FC<LoreStudioProps> = ({
     };
 
     return (
-        <div className="p-6 max-w-7xl mx-auto w-full space-y-8 h-full overflow-y-auto">
+        <div className={themeConfig.layout.studioContainer}>
             <div className="mb-4">
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
                     <div>
-                        <h2 className="text-3xl font-bold text-neutral-200 mb-2">Lore Studio</h2>
-                        <p className="text-neutral-400">Define the elements of your story universe. This lore will be used as context to guide every AI image generation, ensuring consistency.</p>
+                        <h2 className={themeConfig.typography.pageTitle}>Lore Studio</h2>
+                        <p className={themeConfig.typography.pageSubtitle}>Define the elements of your story universe. This lore will be used as context to guide every AI image generation, ensuring consistency.</p>
                     </div>
                     <button
                         onClick={handleExportLorepack}

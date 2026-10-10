@@ -3,6 +3,7 @@ import React, { useState, useRef } from 'react';
 import { Project } from '../types.ts';
 import { EditIcon, DownloadIcon, ImageIcon } from './icons.tsx';
 import { TrashIcon } from './icons/TrashIcon';
+import { themeConfig } from '../themeConfig.ts';
 
 interface ProjectsStudioProps {
     projects: Project[];
@@ -48,8 +49,8 @@ const ProjectCard: React.FC<{
             onClick={onSelect}
             className={`flex flex-col transition-all duration-300 group rounded-xl relative overflow-hidden cursor-pointer border ${
                 isActive 
-                    ? 'bg-neutral-800 border-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.3)]' 
-                    : 'bg-neutral-900/50 border-neutral-700 hover:bg-neutral-800 hover:border-neutral-600'
+                    ? 'bg-surface border-brand shadow-[0_0_15px_rgba(37,99,235,0.3)]' 
+                    : 'bg-secondary/50 border-accent hover:bg-surface hover:border-neutral-500/50'
             }`}
         >
             {/* Project Thumbnail Header */}
@@ -183,14 +184,14 @@ export const ProjectsStudio: React.FC<ProjectsStudioProps> = ({ projects, active
     };
     
     return (
-        <div className="p-6 max-w-7xl mx-auto w-full space-y-8 h-full overflow-y-auto">
+        <div className={themeConfig.layout.studioContainer}>
             <div className="mb-8">
-                <h2 className="text-3xl font-bold text-neutral-200 mb-2">Projects</h2>
-                <p className="text-neutral-400">Manage your productions. Each project contains its own separate universe of images, scripts, characters, and settings.</p>
+                <h2 className={themeConfig.typography.pageTitle}>Projects</h2>
+                <p className={themeConfig.typography.pageSubtitle}>Manage your productions. Each project contains its own separate universe of images, scripts, characters, and settings.</p>
             </div>
 
-            <div className="bg-neutral-800/50 p-6 border border-neutral-700 rounded-xl shadow-2xl">
-                <h3 className="text-sm font-bold text-neutral-400 uppercase tracking-widest mb-4">Start New Production</h3>
+            <div className={themeConfig.cards.elevated}>
+                <h3 className={themeConfig.typography.sectionHeader + " mb-4"}>Start New Production</h3>
                 <form onSubmit={handleCreate} className="flex flex-col md:flex-row gap-6">
                     {/* Thumbnail Input */}
                     <div 
@@ -226,20 +227,20 @@ export const ProjectsStudio: React.FC<ProjectsStudioProps> = ({ projects, active
                             value={newProjectName}
                             onChange={(e) => setNewProjectName(e.target.value)}
                             placeholder="Project Title (e.g. Cyberpunk Noir Feature)..."
-                            className="w-full bg-black border border-neutral-800 p-4 rounded-xl focus:ring-2 focus:ring-brand outline-none text-white font-black tracking-tight"
+                            className={themeConfig.forms.input}
                         />
                         <input
                             type="text"
                             value={newProjectTagline}
                             onChange={(e) => setNewProjectTagline(e.target.value)}
                             placeholder="Short Tagline (e.g. A detective story set in 2049)..."
-                            className="w-full bg-black border border-neutral-800 p-4 rounded-xl focus:ring-2 focus:ring-brand outline-none text-neutral-300 font-medium"
+                            className={themeConfig.forms.input}
                         />
                         <div className="flex justify-end pt-2">
                             <button
                                 type="submit"
                                 disabled={!newProjectName.trim()}
-                                className="bg-blue-600 text-white font-black uppercase text-xs tracking-widest py-4 px-8 hover:bg-blue-500 transition duration-300 disabled:bg-neutral-800 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl shadow-2xl"
+                                className={themeConfig.buttons.primary}
                             >
                                 Create Production
                             </button>
@@ -268,33 +269,33 @@ export const ProjectsStudio: React.FC<ProjectsStudioProps> = ({ projects, active
                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
                          </div>
                         <h3 className="text-xl font-bold text-neutral-300 mb-2">No Projects Found</h3>
-                        <p className="text-neutral-500 max-w-xs mx-auto">Create your first project above to begin your creative journey.</p>
+                        <p className={themeConfig.typography.bodyMuted + " max-w-xs mx-auto text-center"}>Create your first project above to begin your creative journey.</p>
                     </div>
                 )}
             </div>
 
             {/* Delete Confirmation Modal */}
             {projectToDelete && (
-                <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-fade-in">
-                    <div className="bg-neutral-900 border border-neutral-700 rounded-xl p-6 max-w-md w-full shadow-2xl relative overflow-hidden">
+                <div className={themeConfig.forms.modalOverlay}>
+                    <div className={themeConfig.forms.modalDialog + " p-6"}>
                         <div className="absolute top-0 left-0 w-full h-1 bg-red-600"></div>
                         <h3 className="text-xl font-bold text-white mb-2 flex items-center gap-2">
                             <TrashIcon className="w-6 h-6 text-red-500" />
                             Delete Project?
                         </h3>
-                        <p className="text-neutral-400 text-sm mb-6 leading-relaxed">
+                        <p className={themeConfig.typography.bodyMuted + " mb-6"}>
                             Are you sure you want to delete this project? This will <strong className="text-white">permanently remove</strong> all associated scripts, images, lore, and characters. This action cannot be undone.
                         </p>
                         <div className="flex justify-end gap-3">
                             <button 
                                 onClick={() => setProjectToDelete(null)}
-                                className="px-4 py-2 text-sm font-bold text-neutral-300 hover:text-white bg-neutral-800 hover:bg-neutral-700 rounded-lg transition-colors"
+                                className={themeConfig.buttons.secondary}
                             >
                                 Cancel
                             </button>
                             <button 
                                 onClick={confirmDelete}
-                                className="px-4 py-2 text-sm font-bold bg-red-600 hover:bg-red-500 text-white rounded-lg transition-colors shadow-lg hover:shadow-red-500/20"
+                                className={themeConfig.buttons.danger}
                             >
                                 Confirm Delete
                             </button>

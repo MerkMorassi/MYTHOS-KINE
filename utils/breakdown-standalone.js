@@ -48,6 +48,22 @@ var MythosBreakdown = (function () {
     return o;
   }
 
+  /* Internal cue-colon hardening helper */
+  function cleanCharacterName(name) {
+    var n = clean(name).replace(/^@/, "").trim();
+    if (n.endsWith(":") && !n.endsWith("::")) {
+      var base = n.slice(0, -1).trim();
+      if (base.length > 0 && base.length <= 38) {
+        if (base === base.toUpperCase() && /[A-Z]/.test(base)) {
+          if (!/^(FADE IN|FADE OUT|CUT TO|SMASH CUT TO|DISSOLVE TO|MATCH CUT TO|JUMP CUT TO)$/i.test(base) && !/TO$/i.test(base)) {
+            n = base;
+          }
+        }
+      }
+    }
+    return n.toUpperCase();
+  }
+
   /* ---- scene header: "INT. NIGHT BUS - NIGHT" ---- */
   function parseSceneHeader(text) {
     var raw = clean(text);
@@ -152,13 +168,24 @@ var MythosBreakdown = (function () {
       if (type === "scene") { open(text); continue; }
       if (!cur) open("");
       if (type === "character") {
-        var nm = text.toUpperCase();
+        var nm = cleanCharacterName(text);
         if (cur.cast.indexOf(nm) === -1) cur.cast.push(nm);
         if (cur.onSet.indexOf(nm) === -1) cur.onSet.push(nm);
-        cur.words += text.split(/\s+/).length;
+        cur.words += nm.split(/\s+/).length;
         continue;
       }
-      if (type === "dialogue") { cur.dialogueLines++; cur.words += text.split(/\s+/).length; continue; }
+      if (type === "dialogue") {
+        cur.dialogueLines++;
+        cur.words += text.split(/\s+/).length;
+        /* dialogue [tag:] scanning so [extra:], [prop:], etc. in dialogue are captured */
+        var dTags = extractTags(p.text);
+        var dt;
+        for (dt = 0; dt < dTags.length; dt++) {
+          var dk = dTags[dt].kind;
+          if (cur[dk] && cur[dk].indexOf(dTags[dt].value) === -1) cur[dk].push(dTags[dt].value);
+        }
+        continue;
+      }
       if (type === "transition") {
         if (cur.transitions.indexOf(text.toUpperCase()) === -1) cur.transitions.push(text.toUpperCase());
         continue;
@@ -334,6 +361,10 @@ var MythosBreakdown = (function () {
     }
     function isChar(l) {
       var t = l.replace(/^@/, "");
+      // If ends with single colon, check base
+      if (t.endsWith(":") && !t.endsWith("::")) {
+        t = t.slice(0, -1).trim();
+      }
       if (!t || t.length > 38) return false;
       if (/^(INT\.|EXT\.|EST\.)/i.test(t)) return false;
       if (/^\(.*\)$/.test(t)) return false;
@@ -347,7 +378,7 @@ var MythosBreakdown = (function () {
       if (bl.length === 1) {
         var L = bl[0].replace(/^!\s*/, "");
         if (L.charAt(0) === ".") { out.push({ type: "scene", text: L.slice(1) }); prev = "scene"; continue; }
-        if (L.charAt(0) === "@") { out.push({ type: "character", text: L.slice(1) }); prev = "character"; continue; }
+        if (L.charAt(0) === "@") { out.push({ type: "character", text: cleanCharacterName(L.slice(1)) }); prev = "character"; continue; }
         if (isScene(L)) { out.push({ type: "scene", text: L }); prev = "scene"; continue; }
         if (isTrans(L)) { out.push({ type: "transition", text: L }); prev = "transition"; continue; }
         if (/^\(.*\)$/.test(L)) {
@@ -355,13 +386,13 @@ var MythosBreakdown = (function () {
           prev = out[out.length - 1].type;
           continue;
         }
-        if (isChar(L)) { out.push({ type: "character", text: L }); prev = "character"; continue; }
+        if (isChar(L)) { out.push({ type: "character", text: cleanCharacterName(L) }); prev = "character"; continue; }
         if (prev === "character" || prev === "parenthetical") { out.push({ type: "dialogue", text: L }); prev = "dialogue"; continue; }
         out.push({ type: "action", text: L }); prev = "action"; continue;
       }
       var first = bl[0].replace(/^!\s*/, "");
       if (first.charAt(0) === "@" || isChar(first)) {
-        out.push({ type: "character", text: first.replace(/^@/, "") });
+        out.push({ type: "character", text: cleanCharacterName(first.replace(/^@/, "")) });
         var rest = bl.slice(1), di = 0;
         if (rest.length && /^\(.*\)$/.test(rest[0])) { out.push({ type: "parenthetical", text: rest[0] }); di = 1; }
         var dlg = rest.slice(di).join(" ");
@@ -387,7 +418,10 @@ var MythosBreakdown = (function () {
       var t = (m[1] || "action").toLowerCase();
       if ("scene action character parenthetical dialogue transition".indexOf(t) === -1) t = "action";
       var txt = clean(m[2]);
-      if (txt) out.push({ type: t, text: txt });
+      if (txt) {
+        if (t === "character") txt = cleanCharacterName(txt);
+        out.push({ type: t, text: txt });
+      }
     }
     return out;
   }
@@ -398,9 +432,12 @@ var MythosBreakdown = (function () {
       if (!c) return [];
       var ps = c.querySelectorAll("p"), out = [], i;
       for (i = 0; i < ps.length; i++) {
+        var t = (ps[i].getAttribute("data-type") || "action").toLowerCase();
+        var txt = clean(ps[i].textContent);
+        if (t === "character") txt = cleanCharacterName(txt);
         out.push({
-          type: (ps[i].getAttribute("data-type") || "action").toLowerCase(),
-          text: clean(ps[i].textContent)
+          type: t,
+          text: txt
         });
       }
       return out;

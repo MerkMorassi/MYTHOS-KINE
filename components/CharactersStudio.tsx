@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Character } from '../types.ts';
 import { UserIcon, EditIcon, TrashIcon, UploadIcon, PlusIcon, CloseIcon } from './icons.tsx';
+import { themeConfig } from '../themeConfig.ts';
 
 // Helper to read file as base64
 const fileToBase64 = (file: File): Promise<string> =>
@@ -44,13 +45,13 @@ const CharacterFormModal: React.FC<{
     };
 
     return (
-        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-fade-in">
+        <div className={themeConfig.forms.modalOverlay}>
             <div 
-                className="bg-neutral-900 border border-neutral-700 w-full max-w-2xl rounded-xl flex flex-col overflow-hidden shadow-2xl"
+                className={themeConfig.forms.modalDialog}
                 onClick={e => e.stopPropagation()}
             >
                 <div className="flex justify-between items-center p-6 border-b border-neutral-800">
-                    <h2 className="text-xl font-bold text-white">{character?.id ? 'Edit Character' : 'Create Character'}</h2>
+                    <h2 className={themeConfig.typography.studioTitle}>{character?.id ? 'Edit Character' : 'Create Character'}</h2>
                     <button onClick={onClose} className="p-2 hover:bg-neutral-800 rounded-full"><CloseIcon /></button>
                 </div>
                 <form onSubmit={handleSubmit} className="p-6 space-y-6 overflow-y-auto">
@@ -73,22 +74,22 @@ const CharacterFormModal: React.FC<{
                         <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleAvatarUpload} />
                         <div className="flex-grow space-y-4">
                             <div>
-                                <label className="block text-xs font-bold text-neutral-400 uppercase mb-2">Name</label>
-                                <input type="text" name="name" value={formData.name || ''} onChange={handleChange} className="w-full bg-neutral-800 p-3 rounded-lg text-lg font-bold" required />
+                                <label className={themeConfig.typography.label + " mb-2"}>Name</label>
+                                <input type="text" name="name" value={formData.name || ''} onChange={handleChange} className={themeConfig.forms.input} required />
                             </div>
                              <div>
-                                <label className="block text-xs font-bold text-neutral-400 uppercase mb-2">Archetype</label>
-                                <input type="text" name="archetype" value={formData.archetype || ''} onChange={handleChange} className="w-full bg-neutral-800 p-3 rounded-lg" placeholder="e.g., The Mentor, The Rebel" />
+                                <label className={themeConfig.typography.label + " mb-2"}>Archetype</label>
+                                <input type="text" name="archetype" value={formData.archetype || ''} onChange={handleChange} className={themeConfig.forms.input} placeholder="e.g., The Mentor, The Rebel" />
                             </div>
                         </div>
                     </div>
                     <div>
-                        <label className="block text-xs font-bold text-neutral-400 uppercase mb-2">Description / Backstory</label>
-                        <textarea name="description" value={formData.description || ''} onChange={handleChange} rows={6} className="w-full bg-neutral-800 p-3 rounded-lg text-sm" />
+                        <label className={themeConfig.typography.label + " mb-2"}>Description / Backstory</label>
+                        <textarea name="description" value={formData.description || ''} onChange={handleChange} rows={6} className={themeConfig.forms.textarea} />
                     </div>
                      <div className="pt-4 flex justify-end gap-3">
-                        <button type="button" onClick={onClose} className="px-6 py-2 bg-neutral-700 text-neutral-200 rounded-lg hover:bg-neutral-600 transition-colors">Cancel</button>
-                        <button type="submit" className="px-6 py-2 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-500 transition-colors">{character?.id ? 'Save Changes' : 'Create Character'}</button>
+                        <button type="button" onClick={onClose} className={themeConfig.buttons.secondary}>Cancel</button>
+                        <button type="submit" className={themeConfig.buttons.primary}>{character?.id ? 'Save Changes' : 'Create Character'}</button>
                     </div>
                 </form>
             </div>
@@ -152,13 +153,13 @@ export const CharactersStudio: React.FC<{
     };
 
     return (
-        <div className="p-6 max-w-7xl mx-auto w-full space-y-8 h-full overflow-y-auto">
+        <div className={themeConfig.layout.studioContainer}>
             <div className="flex justify-between items-center">
                 <div>
-                    <h2 className="text-3xl font-bold text-neutral-200 mb-2">Characters</h2>
-                    <p className="text-neutral-400">Manage the cast for your project.</p>
+                    <h2 className={themeConfig.typography.pageTitle}>Characters</h2>
+                    <p className={themeConfig.typography.pageSubtitle}>Manage the cast for your project.</p>
                 </div>
-                <button onClick={handleOpenCreate} className="px-5 py-2.5 bg-blue-600 text-white font-bold rounded-lg flex items-center gap-2 hover:bg-blue-500 transition-colors">
+                <button onClick={handleOpenCreate} className={themeConfig.buttons.primary}>
                     <PlusIcon className="w-5 h-5" /> New Character
                 </button>
             </div>
@@ -167,7 +168,7 @@ export const CharactersStudio: React.FC<{
                  <div className="flex flex-col items-center justify-center h-[50vh] border-2 border-dashed border-neutral-800 rounded-xl">
                     <div className="w-16 h-16 text-neutral-700 mb-4"><UserIcon /></div>
                     <h3 className="text-xl font-semibold">No Characters Found</h3>
-                    <p className="text-neutral-500 mt-2">Create a character to begin building your cast.</p>
+                    <p className={themeConfig.typography.bodyMuted + " mt-2"}>Create a character to begin building your cast.</p>
                 </div>
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">

@@ -4,6 +4,7 @@ import { ActiveView, Project, ImageState, AudioSentimentAnalysis } from '../type
 import { StoryboardIcon, CharacterIcon, LoreIcon, PinIcon, ShuffleIcon, GridIcon, LibraryIcon, DashboardIcon, EditIcon, CheckIcon, ScriptIcon, ImageIcon } from './icons.tsx';
 import { AudioThemesBubbleChart } from './AudioThemesBubbleChart.tsx';
 import { analyzeAudioSentimentAndThemesService } from '../services/geminiService.ts';
+import { themeConfig } from '../themeConfig.ts';
 
 interface DashboardStudioProps {
     project: Project;
@@ -44,10 +45,10 @@ const StatCard: React.FC<{
 }> = ({ title, value, icon, onClick, color }) => (
     <div
         onClick={onClick}
-        className={`bg-neutral-800/40 p-5 border border-neutral-800 hover:bg-neutral-800/80 ${colorClasses[color].border} transition-all duration-300 cursor-pointer group rounded-xl shadow-inner`}
+        className={`bg-surface/40 p-5 border border-accent hover:bg-surface/80 ${colorClasses[color].border} transition-all duration-300 cursor-pointer group rounded-xl shadow-inner`}
     >
         <div className="flex items-center justify-between mb-3">
-            <h3 className="text-[10px] font-black text-neutral-500 uppercase tracking-[0.2em]">{title}</h3>
+            <h3 className={themeConfig.typography.label}>{title}</h3>
             <div className={`${colorClasses[color].text} transition-all transform group-hover:scale-110 duration-500 opacity-70 group-hover:opacity-100`}>{icon}</div>
         </div>
         <p className="text-4xl font-black text-white">{value}</p>
@@ -310,13 +311,13 @@ export const DashboardStudio: React.FC<DashboardStudioProps> = ({ project, onUpd
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 {/* Project Brief Column */}
-                <div className="lg:col-span-2 bg-neutral-900/50 border border-neutral-800 rounded-2xl p-8 flex flex-col min-h-[450px] shadow-2xl">
+                <div className={`lg:col-span-2 ${themeConfig.cards.panel} flex flex-col min-h-[450px]`}>
                     <div className="flex justify-between items-center mb-6 border-b border-neutral-800 pb-6">
                         <div className="flex items-center gap-3">
                             <div className="p-2 bg-blue-500/10 rounded-lg text-brand">
                                 <LibraryIcon className="w-5 h-5" />
                             </div>
-                            <h2 className="text-xl font-black text-white uppercase tracking-tight">Mission Brief</h2>
+                            <h2 className={themeConfig.typography.studioTitle}>Mission Brief</h2>
                         </div>
                         <button 
                             onClick={() => isEditingBrief ? handleSaveBrief() : setIsEditingBrief(true)}
@@ -331,7 +332,7 @@ export const DashboardStudio: React.FC<DashboardStudioProps> = ({ project, onUpd
                             <textarea
                                 value={brief}
                                 onChange={(e) => setBrief(e.target.value)}
-                                className="w-full h-full min-h-[300px] bg-black/40 border border-neutral-800 rounded-xl p-6 text-neutral-200 focus:ring-1 focus:ring-brand outline-none resize-none font-mono text-sm leading-relaxed"
+                                className={themeConfig.forms.textarea + " min-h-[300px]"}
                                 placeholder="Define the creative vision, high-level plot points, and technical objectives..."
                             />
                         ) : (
@@ -344,7 +345,7 @@ export const DashboardStudio: React.FC<DashboardStudioProps> = ({ project, onUpd
 
                 {/* Stats Grid Column */}
                 <div className="lg:col-span-1 space-y-6">
-                    <h3 className="text-[10px] font-black text-neutral-500 uppercase tracking-[0.4em] mb-2 px-2">Asset Inventory</h3>
+                    <h3 className={themeConfig.typography.label + " mb-2 px-2"}>Asset Inventory</h3>
                     <div className="grid grid-cols-2 gap-4">
                         <StatCard title="Storyboard" value={stats.storyboardFrames} icon={<StoryboardIcon />} onClick={() => onNavigate('story')} color="purple" />
                         <StatCard title="Drafts" value={stats.scriptsCount} icon={<ScriptIcon />} onClick={() => onNavigate('scripts-bin')} color="emerald" />
@@ -352,9 +353,9 @@ export const DashboardStudio: React.FC<DashboardStudioProps> = ({ project, onUpd
                         <StatCard title="Inspo" value={stats.inspirationImages} icon={<PinIcon />} onClick={() => onNavigate('inspiration')} color="pink" />
                     </div>
                     
-                    <div className="mt-8 bg-neutral-900 border border-neutral-800 rounded-2xl p-6 shadow-2xl relative overflow-hidden">
+                    <div className={`mt-8 ${themeConfig.cards.elevated} relative overflow-hidden`}>
                         <div className="absolute top-0 right-0 w-24 h-24 bg-brand/5 blur-[80px] rounded-full"></div>
-                        <h3 className="text-[10px] font-black text-neutral-500 uppercase tracking-[0.3em] mb-4">Command Center</h3>
+                        <h3 className={themeConfig.typography.label + " mb-4"}>Command Center</h3>
                         <div className="space-y-3">
                             <button onClick={() => onNavigate('team')} className="w-full text-left px-5 py-4 bg-neutral-800/40 hover:bg-neutral-800 border border-neutral-800 rounded-xl text-xs font-black uppercase tracking-widest text-neutral-300 transition-all flex items-center justify-between group">
                                 <span>Consult Studio Crew</span>
@@ -370,11 +371,11 @@ export const DashboardStudio: React.FC<DashboardStudioProps> = ({ project, onUpd
             </div>
 
             {/* Asset Gallery Strip */}
-            <div className="bg-neutral-900/40 border border-neutral-800 rounded-2xl p-8 shadow-2xl relative">
+            <div className={themeConfig.cards.panel}>
                 <div className="flex justify-between items-center mb-6">
                     <div className="flex items-center gap-3">
                         <div className="w-2 h-6 bg-red-600 rounded-full"></div>
-                        <h3 className="text-xl font-black text-white uppercase tracking-tight">Recent Visual Data</h3>
+                        <h3 className={themeConfig.typography.studioTitle}>Recent Visual Data</h3>
                     </div>
                     <button onClick={() => onNavigate('grid')} className="text-[10px] font-black text-brand hover:text-brand-hover transition-colors uppercase tracking-[0.2em] border-b border-brand/20 pb-0.5">Access Vault →</button>
                 </div>

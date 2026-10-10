@@ -9,6 +9,7 @@ import {
     TransitionIcon, DollyIcon, WarningIcon, SpeakerIcon, ChevronLeftIcon, UserIcon, AudioSparkIcon
 } from './icons.tsx';
 import { hasCriticalKeys } from '../services/apiKeyService';
+import { themeConfig } from '../themeConfig.ts';
 
 interface SidebarProps {
     activeView: ActiveView;
@@ -160,10 +161,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeView, onNavigate, user, 
     };
     
     return (
-        <div className={`bg-neutral-900 border-r border-neutral-800 flex flex-col h-full flex-shrink-0 transition-all duration-300 ease-in-out ${isCollapsed ? 'w-20' : 'w-64'}`}>
-            <div className={`p-6 border-b border-neutral-800 transition-all duration-300 ${isCollapsed ? 'py-4' : 'py-6'}`}>
+        <div className={`${themeConfig.sidebar.container} ${isCollapsed ? 'w-20' : 'w-64'}`}>
+            <div className={`${themeConfig.sidebar.header} ${isCollapsed ? 'py-4' : 'py-6'}`}>
                 <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-black text-xs shadow-lg shadow-blue-900/50 flex-shrink-0">M</div>
+                    <div className="w-8 h-8 bg-brand rounded-lg flex items-center justify-center text-white font-black text-xs shadow-lg shadow-blue-900/50 flex-shrink-0">M</div>
                     {!isCollapsed && (
                         <div className="transition-opacity duration-200">
                             <h1 className="text-lg font-black text-white tracking-tighter leading-none">MYTHOS</h1>
@@ -179,7 +180,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeView, onNavigate, user, 
                         if (item.type === 'header') {
                             return (
                                 <div key={item.id} className={`px-3 pt-5 pb-2 transition-all ${isCollapsed ? 'text-center' : ''}`}>
-                                    <p className={`text-[10px] font-black text-neutral-600 uppercase tracking-widest transition-all ${isCollapsed ? 'opacity-0 h-0' : 'opacity-100'}`}>
+                                    <p className={`${themeConfig.sidebar.sectionTitle} transition-all ${isCollapsed ? 'opacity-0 h-0' : 'opacity-100'}`}>
                                         {!isCollapsed ? item.label : ''}
                                     </p>
                                 </div>
@@ -200,12 +201,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeView, onNavigate, user, 
                                 onDragEnd={handleDrop}
                                 onClick={() => item.view && onNavigate(item.view)}
                                 title={isCollapsed ? item.label : undefined}
-                                className={`w-full flex items-center gap-3 px-3 py-2 text-xs font-bold rounded-lg transition-all group ${isCollapsed ? 'justify-center' : ''} ${
+                                className={`w-full flex items-center gap-3 px-3 py-2 text-xs font-bold rounded-lg transition-all group cursor-pointer ${isCollapsed ? 'justify-center' : ''} ${
                                     isActive 
-                                        ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/20' 
+                                        ? themeConfig.sidebar.navItemActive 
                                         : isSettings && !keysPresent
                                         ? 'text-red-400 hover:bg-red-900/20'
-                                        : 'text-neutral-400 hover:bg-neutral-800 hover:text-white'
+                                        : themeConfig.sidebar.navItemInactive
                                 }`}
                             >
                                 <Icon className={`w-4 h-4 transition-colors flex-shrink-0 ${isActive ? 'text-white' : isSettings && !keysPresent ? 'text-red-400' : 'text-neutral-500 group-hover:text-white'}`} />
@@ -217,13 +218,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeView, onNavigate, user, 
                 </nav>
             </div>
 
-            <div className={`p-4 border-t border-neutral-800 bg-neutral-900 transition-all duration-300`}>
+            <div className={`p-4 border-t border-accent bg-secondary transition-all duration-300`}>
                 {user && (
-                    <div className={`flex items-center gap-3 mb-3 px-3 py-2 rounded-lg bg-neutral-950 border border-neutral-800 ${isCollapsed ? 'justify-center' : ''}`}>
+                    <div className={`flex items-center gap-3 mb-3 px-3 py-2 rounded-lg bg-neutral-950 border border-accent ${isCollapsed ? 'justify-center' : ''}`}>
                         {user.photoURL ? (
                             <img src={user.photoURL} alt="Profile" className="w-6 h-6 rounded-full border border-neutral-700 shrink-0" referrerPolicy="no-referrer" />
                         ) : (
-                            <div className="w-6 h-6 rounded-full bg-blue-600 text-white font-black text-[10px] flex items-center justify-center shrink-0">
+                            <div className="w-6 h-6 rounded-full bg-brand text-white font-black text-[10px] flex items-center justify-center shrink-0">
                                 {user.displayName?.charAt(0).toUpperCase() || 'U'}
                             </div>
                         )}
@@ -237,7 +238,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeView, onNavigate, user, 
                             <button 
                                 onClick={onSignOut}
                                 title="Sign Out"
-                                className="text-neutral-500 hover:text-red-400 transition-colors p-1 shrink-0"
+                                className="text-neutral-500 hover:text-red-400 transition-colors p-1 shrink-0 cursor-pointer"
                             >
                                 <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
@@ -246,7 +247,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeView, onNavigate, user, 
                         )}
                     </div>
                 )}
-                <button onClick={toggleCollapse} className="w-full flex items-center justify-center gap-3 px-3 py-2 text-xs font-bold text-neutral-500 hover:text-white rounded-lg transition-all hover:bg-neutral-800">
+                <button onClick={toggleCollapse} className="w-full flex items-center justify-center gap-3 px-3 py-2 text-xs font-bold text-neutral-500 hover:text-white rounded-lg transition-all hover:bg-surface cursor-pointer">
                     <ChevronLeftIcon className={`w-4 h-4 transition-transform duration-300 ${isCollapsed ? 'rotate-180' : ''}`} />
                 </button>
             </div>

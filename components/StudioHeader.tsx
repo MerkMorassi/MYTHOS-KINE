@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { HomeIcon, PhoneIcon, ChatIcon, ChevronRightIcon, SearchIcon, CloseIcon } from './icons.tsx';
 import { Agent, Project, ActiveView, LoreEntry } from '../types.ts';
 import { AutoSaveIndicator, SaveStatus } from './AutoSaveIndicator.tsx';
+import { themeConfig } from '../themeConfig.ts';
 
 interface StudioHeaderProps {
     breadcrumbs: { label: string; onClick?: () => void }[];
@@ -84,7 +85,7 @@ export const StudioHeader: React.FC<StudioHeaderProps> = ({
     const hasResults = results.projects.length > 0 || results.lore.length > 0 || results.agents.length > 0;
 
     return (
-        <div className="flex-shrink-0 bg-neutral-900 border-b border-neutral-800 px-6 py-3.5 flex flex-col md:flex-row md:items-center justify-between gap-4 sticky top-0 z-30">
+        <div className="flex-shrink-0 bg-secondary border-b border-accent px-6 py-3.5 flex flex-col md:flex-row md:items-center justify-between gap-4 sticky top-0 z-30 backdrop-blur-md">
             {/* Left Section: Breadcrumbs + Auto-save indicator */}
             <div className="flex flex-wrap items-center gap-3 text-sm text-neutral-400 font-medium">
                 <div className="flex items-center gap-2">
@@ -97,12 +98,12 @@ export const StudioHeader: React.FC<StudioHeaderProps> = ({
                             {crumb.onClick ? (
                                 <button 
                                     onClick={crumb.onClick}
-                                    className="hover:text-white transition-colors hover:underline decoration-neutral-600 underline-offset-4"
+                                    className="hover:text-white transition-colors hover:underline decoration-neutral-600 underline-offset-4 cursor-pointer"
                                 >
                                     {crumb.label}
                                 </button>
                             ) : (
-                                <span className="text-white font-bold">{crumb.label}</span>
+                                <span className={themeConfig.header.breadcrumbCurrent}>{crumb.label}</span>
                             )}
                         </React.Fragment>
                     ))}
@@ -131,7 +132,7 @@ export const StudioHeader: React.FC<StudioHeaderProps> = ({
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
                             onFocus={() => setIsFocused(true)}
-                            className="block w-full pl-10 pr-10 py-2 bg-neutral-950 border border-neutral-800 rounded-xl text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 transition-all font-medium"
+                            className={themeConfig.header.searchBar}
                         />
                         {searchTerm && (
                             <button
@@ -259,7 +260,7 @@ export const StudioHeader: React.FC<StudioHeaderProps> = ({
             {/* Right Section: Agent Controls (if agent is present) */}
             {agent && onOpenChat && (
                 <div className="flex items-center gap-3">
-                    <div className="flex items-center gap-2 bg-neutral-800/50 border border-neutral-700 rounded-full pl-1 pr-4 py-1">
+                    <div className={themeConfig.header.avatarBadge}>
                         <img 
                             src={agent.avatar || `https://ui-avatars.com/api/?name=${agent.name}&background=random`} 
                             alt={agent.name} 

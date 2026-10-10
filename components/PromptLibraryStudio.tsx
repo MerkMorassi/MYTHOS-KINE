@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { PromptTemplate } from '../types.ts';
 import { LibraryIcon } from './icons.tsx';
+import { themeConfig } from '../themeConfig.ts';
 
 interface PromptLibraryStudioProps {
     templates: PromptTemplate[];
@@ -134,10 +135,10 @@ export const PromptLibraryStudio: React.FC<PromptLibraryStudioProps> = ({ templa
     const [editingId, setEditingId] = useState<string | null>(null);
 
     return (
-        <div className="p-6 max-w-7xl mx-auto w-full space-y-8 h-full overflow-y-auto">
+        <div className={themeConfig.layout.studioContainer}>
             <div className="mb-8">
-                <h2 className="text-3xl font-bold text-neutral-200 mb-2">Prompt Library</h2>
-                <p className="text-neutral-400 mb-6">Create and manage reusable prompt templates. These "styles" can be quickly applied from the Grid view to maintain a consistent look and feel.</p>
+                <h2 className={themeConfig.typography.pageTitle}>Prompt Library</h2>
+                <p className={themeConfig.typography.pageSubtitle + " mb-6"}>Create and manage reusable prompt templates. These "styles" can be quickly applied from the Grid view to maintain a consistent look and feel.</p>
                 <CreateTemplateForm onCreate={onCreate} />
             </div>
             
@@ -154,12 +155,12 @@ export const PromptLibraryStudio: React.FC<PromptLibraryStudioProps> = ({ templa
                                         onCancel={() => setEditingId(null)}
                                     />
                                 ) : (
-                                    <div className="bg-neutral-800/50 p-4 border border-neutral-700 group hover:border-neutral-600 transition-all rounded-lg">
+                                    <div className={themeConfig.cards.base}>
                                         <div className="flex justify-between items-start mb-2">
                                             <h4 className="text-lg font-bold text-neutral-200">{template.name}</h4>
                                             <button 
                                                 onClick={() => setEditingId(template.id)} 
-                                                className="text-sm text-neutral-400 hover:text-white opacity-0 group-hover:opacity-100 transition-opacity"
+                                                className="text-sm text-neutral-400 hover:text-white opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
                                             >
                                                 Edit
                                             </button>
@@ -167,12 +168,12 @@ export const PromptLibraryStudio: React.FC<PromptLibraryStudioProps> = ({ templa
                                         <div className="space-y-2">
                                             <div>
                                                 <p className="text-xs font-semibold text-green-400/80 mb-1">POSITIVE</p>
-                                                <p className="text-sm text-neutral-300 bg-neutral-900/50 p-2 rounded max-h-20 overflow-y-auto border border-neutral-800">{template.positivePrompt}</p>
+                                                <p className="text-sm text-neutral-300 bg-neutral-900/50 p-2 rounded max-h-20 overflow-y-auto border border-neutral-800 font-mono">{template.positivePrompt}</p>
                                             </div>
                                              {template.negativePrompt && (
                                                 <div>
                                                     <p className="text-xs font-semibold text-red-400/80 mb-1">NEGATIVE</p>
-                                                    <p className="text-sm text-neutral-400 bg-neutral-900/50 p-2 rounded max-h-20 overflow-y-auto border border-neutral-800">{template.negativePrompt}</p>
+                                                    <p className="text-sm text-neutral-400 bg-neutral-900/50 p-2 rounded max-h-20 overflow-y-auto border border-neutral-800 font-mono">{template.negativePrompt}</p>
                                                 </div>
                                              )}
                                         </div>
@@ -185,7 +186,7 @@ export const PromptLibraryStudio: React.FC<PromptLibraryStudioProps> = ({ templa
                     <div className="flex flex-col items-center justify-center h-[50vh] border-2 border-dashed border-neutral-800 rounded-xl bg-neutral-900/30 text-center p-8">
                         <div className="w-16 h-16 text-neutral-700 mb-4"><LibraryIcon /></div>
                         <h3 className="text-xl font-semibold text-neutral-300 mb-2">Your Library is Empty</h3>
-                        <p className="text-neutral-500">Create a prompt template above to get started.</p>
+                        <p className={themeConfig.typography.bodyMuted}>Create a prompt template above to get started.</p>
                     </div>
                 )}
             </div>
